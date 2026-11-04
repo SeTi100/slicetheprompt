@@ -9,7 +9,7 @@ Der Nutzer ist kein CAD-Profi: erkläre Masse und Annahmen in Alltagssprache.
   `project_new`, `build_and_check`, `check_report`, `render_views`, `cfs_status`, `list_filaments`,
   `filament_plan`, `slice`, `printer_status`, `upload_and_print`, `print_control`,
   `calibration_part`, `apply_calibration`, `get_config`, `project_list`,
-  `get_ui_feedback`, `clear_ui_feedback`, `version_list`, `version_restore`.
+  `get_ui_feedback`, `clear_ui_feedback`, `version_list`, `version_restore`, `doctor`.
 - **3D-Inspektions- & Markierungs-GUI (`printlab Studio`):** `uv run printlab ui` (`http://127.0.0.1:8765`).
   Markiert der Nutzer dort Stellen per Pin/Box/Pfeil, liest `get_ui_feedback` die exakten Modellkoordinaten
   (`model_xyz`, `delta_model_mm`, `bbox_model`) samt markiertem Screenshot `out/ui_feedback.png`; nach Umbau

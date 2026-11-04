@@ -40,7 +40,7 @@ Die Umsetzung ist in **5 sauber getrennte Arbeitspakete (WP-1 bis WP-5)** geglie
 | **WP-2** | `lib/parts.py`, `printlab/_cad_runner.py`, `printlab/meshcheck.py`, `printlab/pipeline.py` | keine | 3D-Fehler-Diagnostik (`diagnostics_3d.json`), Feature-Tagging (`tag`, `sub_tag`) & Erkennung „leerer Schnitte“ (`ghost_*.stl`) |
 | **WP-3** | `printlab/ui_server.py` *(neu)*, `printlab/cli.py` | WP-1, WP-2 | Lokaler HTTP/SSE-Server (`uv run printlab ui`), REST-API für Projekte, Versionen, Parameter, Feedback & Moonraker-Readonly |
 | **WP-4** | `printlab/ui/index.html`, `printlab/ui/app.js`, `printlab/ui/styles.css`, `printlab/ui/vendor/*` *(alle neu)* | WP-3 | Interaktives Three.js-Studio: 3D-Viewer, Geisterbild-Diff, Fehler-Overlays, Pin/Box/Vektor-Markierung + Screenshot, Messband, Parameter-Panel |
-| **WP-5** | `printlab/mcp_server.py`, `.agents/skills/teil/SKILL.md`, `claude-setup/commands/teil.md`, `AGENTS.md`, `CLAUDE.md`, `tests/test_ui_and_history.py` *(neu)* | WP-1..4 | MCP-Tools (`get_ui_feedback`, `clear_ui_feedback`, `version_list`, `version_restore`), Agent-Workflow-Integration & vollständige Test-Suite |
+| **WP-5** | `printlab/mcp_server.py`, `.agents/skills/teil/SKILL.md`, `.claude/commands/teil.md`, `AGENTS.md`, `CLAUDE.md`, `tests/test_ui_and_history.py` *(neu)* | WP-1..4 | MCP-Tools (`get_ui_feedback`, `clear_ui_feedback`, `version_list`, `version_restore`), Agent-Workflow-Integration & vollständige Test-Suite |
 
 > **Hinweis bei Änderungen an `pipeline.py`:** WP-1 und WP-2 berühren unterschiedliche Stellen in `pipeline.py` (`prepare`/`check` vs. `run_all`-Snapshot-Hook). Bei paralleler Bearbeitung erst WP-2 in `prepare`/`check` integrieren, danach den Snapshot-Aufruf am Ende von `run_all` einhängen.
 
@@ -269,7 +269,7 @@ Dunkles, klares Engineering-Layout (Tailwind oder schlankes modernes CSS Grid in
    - Erlaubt auch dem Agenten im Chat auf Zuruf (*„Geh zurück auf Version 2“*), sauber über dieselbe Snapshot-Logik zurückzuspringen.
 
 ### 4.3 Anpassung der Skills & Arbeitsregeln
-- In [`.agents/skills/teil/SKILL.md`](./.agents/skills/teil/SKILL.md) und [`claude-setup/commands/teil.md`](./claude-setup/commands/teil.md) (und Kopie nach `.claude/commands/teil.md`):
+- In [`.agents/skills/teil/SKILL.md`](./.agents/skills/teil/SKILL.md) und [`.claude/commands/teil.md`](./.claude/commands/teil.md) (und Kopie nach `.claude/commands/teil.md`):
   - Bei Änderungen an einem bestehenden Projekt zuerst prüfen, ob `out/ui_feedback.json` vorliegt (`get_ui_feedback`). Falls ja: die exakten `model_xyz` / `delta_model_mm` / `bbox_model`-Angaben und `ui_feedback.png` nutzen, nach erfolgreichem Rebuild `clear_ui_feedback` aufrufen.
   - Empfehlung aufnehmen, bei mehrteiligen Geometrien (Platte + Wände + Bohrungen) wichtige Elemente mit `tag("name", ...)` bzw. `cut_feature(part, "loch_1", ...)` aus `lib.parts` zu benennen, damit `printlab Studio` sie einzeln auswählbar macht und verfehlte Schnitte automatisch erkennt.
 - Kurzen Einzeiler-Verweis auf `uv run printlab ui` und `get_ui_feedback` in [`AGENTS.md`](./AGENTS.md), [`CLAUDE.md`](./CLAUDE.md) und [`README.md`](./README.md) ergänzen.

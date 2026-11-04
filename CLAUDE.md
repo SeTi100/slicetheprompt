@@ -8,7 +8,7 @@ Der Nutzer ist kein CAD-Profi: erkläre Masse und Annahmen in Alltagssprache.
 - MCP-Server **printlab** (in `.mcp.json`): `project_new`, `build_and_check`, `check_report`,
   `render_views`, `cfs_status`, `list_filaments`, `filament_plan`, `slice`, `printer_status`,
   `upload_and_print`, `print_control`, `calibration_part`, `apply_calibration`, `get_config`, `project_list`,
-  `get_ui_feedback`, `clear_ui_feedback`, `version_list`, `version_restore`.
+  `get_ui_feedback`, `clear_ui_feedback`, `version_list`, `version_restore`, `doctor`.
 - **3D-GUI (`printlab Studio`):** `uv run printlab ui` (`http://127.0.0.1:8765`) zeigt 3D-Modell, Versionen,
   Fehlerzonen und erlaubt räumliches Markieren; mit `get_ui_feedback` abrufen und nach Umbau `clear_ui_feedback` aufrufen.
 - Gleiche Funktionen als CLI: `uv run printlab <befehl>` (z. B. wenn der MCP-Server hängt).
@@ -94,6 +94,8 @@ Das Projekt ist ein Git-Repository. `spec.yaml` und `model.py` gehören ins Repo
 Nach einem fertigen Teil auf Wunsch committen (Nachricht: was und welche Masse).
 
 ## Wenn etwas an printlab selbst nicht geht
+Zuerst `doctor` aufrufen: prüft Drucker, CFS, Slicer und CAD und richtet den Slicer nach einem
+frischen `git clone` selbst ein (Creality Print suchen, Hi-Profile auflösen).
 Du darfst `printlab/` reparieren (z. B. Slicer-Aufruf, Profilauswahl in `config/slicer.yaml`).
 Danach `uv run python tests/test_meshcheck.py` und `uv run python tests/test_cfs_3mf.py` laufen lassen und den Nutzer informieren, dass der
 MCP-Server neu gestartet werden muss (`/mcp` → printlab → reconnect).

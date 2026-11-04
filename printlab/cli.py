@@ -30,33 +30,15 @@ def _cube_stl(path: Path, a: float = 20.0) -> Path:
     return path
 
 
-def write_mcp_json() -> list[Path]:
-    from .config import ROOT
-    entry = {
-        "command": sys.executable,
-        "args": ["-m", "printlab.mcp_server"],
-        "env": {
-            "PYTHONPATH": str(ROOT),
-            "PYTHONIOENCODING": "utf-8",
-            "PYTHONUTF8": "1",
-        },
-    }
-    p = ROOT / ".mcp.json"
-    p.write_text(json.dumps({"mcpServers": {"printlab": entry}}, indent=2), encoding="utf-8")
-    written = [p]
-    agy_dir = Path.home() / ".gemini" / "config"
-    if agy_dir.exists():
-        agy_mcp = agy_dir / "mcp_config.json"
-        existing: dict = {}
-        if agy_mcp.exists() and agy_mcp.stat().st_size > 0:
-            try:
-                existing = json.loads(agy_mcp.read_text(encoding="utf-8"))
-            except Exception:
-                existing = {}
-        existing.setdefault("mcpServers", {})["printlab"] = entry
-        agy_mcp.write_text(json.dumps(existing, indent=2), encoding="utf-8")
-        written.append(agy_mcp)
-    return written
+def write_client_configs() -> list[str]:
+    """Clients ausserhalb des Projekts eintragen, die schon installiert sind (Antigravity).
+    Claude Code nutzt die versionierte .mcp.json; Claude Desktop: 'printlab install claude-desktop'."""
+    from .clients import install
+    done = []
+    if (Path.home() / ".gemini" / "config").exists():
+        for r in install("antigravity")["results"]:
+            done.append(f"Antigravity: {r['file']} ({r['action']})")
+    return done
 
 
 def cmd_setup(a) -> int:
@@ -69,8 +51,10 @@ def cmd_setup(a) -> int:
 
     ok = True
     print("== 1/5 MCP-Konfiguration")
-    for mp in write_mcp_json():
-        print("   ", mp)
+    print("    Claude Code: .mcp.json im Projekt (versioniert, startet printlab über uv)")
+    for line in write_client_configs():
+        print("   ", line)
+    print("    Claude Desktop: 'uv run printlab install claude-desktop' (App vorher beenden)")
 
     print("== 2/5 Drucker und CFS")
     try:
@@ -159,7 +143,10 @@ def main(argv=None) -> int:
     s.add_argument("--exe", help="Pfad zu CrealityPrint.exe oder orca-slicer.exe")
     s.add_argument("--keep-selection", action="store_true", help="Profilnamen aus slicer.yaml beibehalten")
 
-    sub.add_parser("doctor", help="Drucker und Slicer kurz prüfen")
+    sub.add_parser("doctor", help="Drucker, CFS, Slicer und CAD prüfen (richtet den Slicer bei Bedarf ein)")
+    s = sub.add_parser("install", help="printlab in einen KI-Client eintragen")
+    s.add_argument("client", choices=["claude-desktop", "claude-code", "antigravity"])
+    s.add_argument("--force", action="store_true", help="auch wenn die Claude-App läuft")
     sub.add_parser("projects", help="Projekte auflisten")
     s = sub.add_parser("new", help="Projekt anlegen")
     s.add_argument("name")
@@ -224,13 +211,13 @@ def main(argv=None) -> int:
         from . import calibration, jobs, pipeline
         from .moonraker import Moonraker
         if a.cmd == "doctor":
-            from .config import load_config
-            res = {"slicer": load_config().get("slicer", {}).get("exe") or "nicht eingerichtet"}
-            try:
-                res["printer"] = Moonraker().status()
-            except Exception as exc:
-                res["printer"] = f"FEHLER: {exc}"
+            from .doctor import run_doctor
+            res = run_doctor()
             _out(res)
+            return 0 if res["ok"] else 1
+        elif a.cmd == "install":
+            from .clients import install
+            _out(install(a.client, a.force))
         elif a.cmd == "projects":
             _out(pipeline.list_projects())
         elif a.cmd == "new":

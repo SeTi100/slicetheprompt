@@ -345,8 +345,38 @@ def reflatten_from_yaml() -> dict:
     return s
 
 
+_AUTO_SETUP_DONE = False
+
+
+def _slicer_ok(s: dict) -> bool:
+    """Passt die gespeicherte Slicer-Konfiguration zu diesem Rechner?"""
+    try:
+        files = s["files"]
+        paths = [s["exe"], files["machine"], *files["process"].values(), *files["filament"].values()]
+        return all(Path(x).exists() for x in paths)
+    except (KeyError, TypeError, AttributeError):
+        return False
+
+
+def slicer_cfg(auto: bool = True) -> dict:
+    """Slicer-Konfiguration; fehlt sie oder stammt sie von einem anderen Rechner, wird sie
+    automatisch neu eingerichtet (Creality Print suchen, Hi-Profile auflösen). So reicht nach
+    einem frischen 'git clone' der erste Slice-Aufruf."""
+    global _AUTO_SETUP_DONE
+    s = load_config().get("slicer") or {}
+    if _slicer_ok(s) or not auto:
+        return s
+    if _AUTO_SETUP_DONE:
+        raise RuntimeError("Slicer-Einrichtung fehlgeschlagen – 'uv run printlab setup' ausführen und "
+                           "die Ausgabe prüfen")
+    _AUTO_SETUP_DONE = True
+    exe = os.environ.get("PRINTLAB_SLICER_EXE") or (s.get("exe") if s.get("exe") and Path(s["exe"]).exists()
+                                                    else None)
+    return setup_slicer(exe)
+
+
 def filament_catalog(ftype: str | None = None) -> list[dict]:
-    cat = (load_config().get("slicer") or {}).get("catalog") or {}
+    cat = slicer_cfg().get("catalog") or {}
     out = [{"name": n, **{k: v for k, v in e.items() if k != "file"}} for n, e in cat.items()]
     if ftype:
         out = [e for e in out if e["type"] == ftype.upper()]
@@ -355,7 +385,7 @@ def filament_catalog(ftype: str | None = None) -> list[dict]:
 
 def filament_file(name: str, color: str | None = None, workdir: Path | None = None) -> str:
     """Pfad zum aufgelösten Filamentprofil; mit Farbe als eigene Kopie (für G-Code-Kopf und Vorschau)."""
-    s = load_config()["slicer"]
+    s = slicer_cfg()
     cat = s.get("catalog") or {}
     if name in cat:
         src = Path(cat[name]["file"])
@@ -474,10 +504,7 @@ def slice_model(model: str | Path, filament_files: list[str], quality: str = "st
                 timeout: int = 900) -> dict:
     """Slicen mit der CLI. model: STL (einfarbig, filament_ids = [Werkzeug 1-basiert]) oder 3MF (mehrteilig).
     filament_files: Profile positionsgenau, Position i = Werkzeug T(i-1) = CFS-Platz i."""
-    cfg = load_config()
-    s = cfg.get("slicer") or {}
-    if not s.get("exe"):
-        raise RuntimeError("Slicer nicht eingerichtet – zuerst 'printlab setup' ausführen")
+    s = slicer_cfg()
     quality = quality.lower()
     files = s["files"]
     if quality not in files["process"]:
@@ -568,7 +595,7 @@ def slice_model(model: str | Path, filament_files: list[str], quality: str = "st
 def slice_stl(stl: str | Path, material: str, quality: str = "standard", outdir: str | Path | None = None,
               timeout: int = 900) -> dict:
     """Einfacher Fall (Setup-Test): ein STL mit dem Standardprofil des Materials auf Werkzeug 1."""
-    files = load_config()["slicer"]["files"]
+    files = slicer_cfg()["files"]
     if material.lower() not in files["filament"]:
         raise ValueError(f"Material '{material}' nicht verfügbar: {', '.join(files['filament'])}")
     return slice_model(stl, [files["filament"][material.lower()]], quality, filament_ids=[1], outdir=outdir,

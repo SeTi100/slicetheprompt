@@ -84,9 +84,12 @@ def cfs_status() -> dict:
     plus passendes Creality-Print-Profil. Vor jeder Filamentwahl aufrufen."""
     def _c():
         from . import cfs as cfsmod
-        cfg = load_config()
+        from .slicer import slicer_cfg
         st = Moonraker().cfs()
-        s = cfg.get("slicer") or {}
+        try:
+            s = slicer_cfg()
+        except Exception:
+            s = {}
         for sl in st["slots"]:
             if sl["loaded"]:
                 sl["profile"] = cfsmod.match_profile(sl, s.get("catalog") or {}, s.get("filament") or {})
@@ -172,6 +175,14 @@ def apply_calibration(material: str, block_x: float, block_y: float, block_z: fl
     vals = dict(block_x=block_x, block_y=block_y, block_z=block_z, loch5=loch5, loch8=loch8, loch10=loch10,
                 stift8=stift8, gesamt_x=gesamt_x, gesamt_y=gesamt_y, platte_z=platte_z, stift_h=stift_h)
     return _safe(calibration.apply_calibration, material, {k: v for k, v in vals.items() if v}, notes)
+
+
+@server.tool()
+def doctor() -> dict:
+    """Zustand prüfen: Drucker (Moonraker, Klipper, CFS), Slicer (gefunden, Profile aufgelöst – richtet
+    sich bei Bedarf selbst ein), Python-Umgebung. Bei Problemen zuerst aufrufen."""
+    from .doctor import run_doctor
+    return _safe(run_doctor)
 
 
 @server.tool()

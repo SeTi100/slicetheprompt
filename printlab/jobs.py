@@ -63,7 +63,8 @@ def plan_filaments(project: str, material: str | None = None, filament=None, pro
     names = body_names(d) or ["_teil"]
     want = _per_body(filament if filament is not None else spec.get("filament"), names)
     prof_want = _per_body(profile if profile is not None else spec.get("filament_profile"), names)
-    s = cfg["slicer"]
+    from .slicer import slicer_cfg
+    s = slicer_cfg()
     catalog = s.get("catalog") or {}
     default_by_type = {k: v for k, v in (s.get("filament") or {}).items()}
 

@@ -11,25 +11,36 @@ Prompt → spec.yaml + model.py → build123d → STEP/STL → Prüfung + Render
 
 ## Einrichtung (einmalig, ca. 10 Minuten)
 
-1. **Claude Code installieren** (falls noch nicht vorhanden), in PowerShell:
-   ```powershell
-   irm https://claude.ai/install.ps1 | iex
-   ```
-   Danach ein neues Terminal öffnen und `claude --version` prüfen. Empfohlen: Git for Windows.
-2. **Projekt einrichten**, in PowerShell im Ordner `slicetheprompt`:
-   ```powershell
-   cd $HOME\Coding_Projects\slicetheprompt
-   powershell -ExecutionPolicy Bypass -File .\setup.ps1
-   ```
-   Das Skript installiert `uv` und Python 3.12 mit allen Paketen, findet Creality Print, sucht die
-   Profile für „Creality Hi 0.4“ (PLA und PETG, 0,12/0,20/0,28 mm), slicet zur Probe einen
-   20-mm-Würfel, testet die Verbindung zum Drucker, baut die Beispiel-Box und schreibt `.mcp.json`.
-   - Creality Print wird nicht gefunden? `.\setup.ps1 -Exe "C:\…\CrealityPrint.exe"`
-   - Test-Slice liefert keinen G-Code? **Creality Print schliessen** und erneut ausführen
-     (das offene Programm kann den Kommandozeilen-Aufruf abfangen).
-3. **Claude Code im Ordner starten:** `claude` (oder in der Claude-Desktop-App den Code-Bereich mit
-   diesem Ordner öffnen). Beim ersten Start den Ordner als vertrauenswürdig bestätigen und den
-   MCP-Server „printlab“ zulassen. Mit `/mcp` prüfen, dass printlab verbunden ist.
+Voraussetzungen: Windows 11, Creality Print 7.x mit eingerichtetem Creality Hi, Drucker im selben
+Netz (Standard-IP `192.168.0.27`, sonst in `config/printer.yaml` ändern), Git und Claude Code
+(`irm https://claude.ai/install.ps1 | iex`).
+
+```powershell
+git clone https://github.com/SeTi100/slicetheprompt
+cd slicetheprompt
+powershell -ExecutionPolicy Bypass -File .\setup.ps1
+claude
+```
+
+Das Setup installiert `uv`, Python 3.12 und alle Pakete, findet Creality Print, löst die Profile
+für „Creality Hi 0.4“ auf (PLA/PETG, 0,12/0,20/0,28 mm), testet Drucker und CFS, slicet zur Probe
+ein- und zweifarbig und baut die Beispiele. Danach `claude` im Ordner starten, den Ordner als
+vertrauenswürdig bestätigen und den MCP-Server „printlab“ zulassen (`/mcp` zeigt den Status).
+
+- Ohne Setup geht es auch: Claude Code startet printlab über die `.mcp.json` mit `uv`, und der
+  Slicer richtet sich beim ersten Slicen selbst ein. Der erste Start dauert dann einige Minuten.
+- **Claude-Desktop-App** statt Claude Code: App ganz beenden, `uv run printlab install claude-desktop`,
+  App starten. Der Befehl trägt printlab mit absolutem Pfad ein und legt eine Sicherung an.
+- Creality Print wird nicht gefunden? `.\setup.ps1 -Exe "C:\…\CrealityPrint.exe"`
+- Test-Slice liefert keinen G-Code? **Creality Print schliessen** und erneut ausführen.
+- Zustand prüfen: `uv run printlab doctor` (oder im Chat: „doctor“).
+
+**Ältere Klone aktualisieren** (vor dem 4.11.2026 18:30 eingerichtet): `.mcp.json` und `.claude\` waren
+damals erzeugte Dateien und sind jetzt versioniert. Einmalig:
+```powershell
+Remove-Item .mcp.json; Remove-Item -Recurse .claude
+git pull
+```
 
 ## Benutzung
 
@@ -71,7 +82,8 @@ printlab liest das CFS über Moonraker: Platz (T1A–T4D), Material, Farbe, Rest
 | `config/slicer.yaml`, `config/slicer/` | gewählte Creality-Print-Profile (vom Setup erzeugt) |
 | `lib/parts.py` | CAD-Bausteine mit Toleranzen: `screw_hole_cut`, `fit`, `nut_trap_cut`, … |
 | `printlab/` | Prüfung, Render, Slicen, CFS, Drucker (MCP-Server und CLI) |
-| `claude-setup/` | Vorlage für `.claude/` (Befehle, Freigaberegeln); `setup.ps1` kopiert sie |
+| `.claude/` | Befehle `/teil`, `/drucken`, `/status`, `/kalibrieren` und Freigaberegeln für Claude Code |
+| `.mcp.json` | startet printlab für Claude Code über `uv` (ohne absolute Pfade) |
 | `projects/<datum>-<name>/` | je Teil: `spec.yaml`, `model.py`, `out/` mit STEP, STL, PNG, G-Code |
 
 ## Ohne Claude (Kommandozeile)
@@ -87,9 +99,10 @@ uv run printlab status
 
 ## Git
 
-Das Projekt ist ein Git-Repository (GitHub: `SeTi100/slicetheprompt`, privat). Nicht versioniert werden
-`.venv`, `.mcp.json`, `.claude/`, die erzeugten Slicer-Profile und alle `out/`-Ordner.
-Nach Änderungen an `claude-setup/` erneut `setup.ps1` ausführen.
+Das Projekt ist ein Git-Repository (GitHub: `SeTi100/slicetheprompt`, öffentlich). Nicht versioniert werden
+`.venv`, die rechnerspezifische Slicer-Konfiguration (`config/slicer.yaml`, `config/slicer/`),
+`.claude/settings.local.json` und alle `out/`-Ordner. Für eigene Commits die GitHub-noreply-Adresse
+verwenden: `git config user.email "<ID>+<name>@users.noreply.github.com"`.
 
 ## Profile ändern
 

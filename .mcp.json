@@ -1,0 +1,20 @@
+{
+  "mcpServers": {
+    "printlab": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--project",
+        "${CLAUDE_PROJECT_DIR:-.}",
+        "--frozen",
+        "--quiet",
+        "printlab-mcp"
+      ],
+      "env": {
+        "PYTHONIOENCODING": "utf-8",
+        "PYTHONUTF8": "1"
+      },
+      "timeout": 900000
+    }
+  }
+}
