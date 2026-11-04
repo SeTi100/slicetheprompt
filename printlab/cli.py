@@ -147,6 +147,7 @@ def main(argv=None) -> int:
     s = sub.add_parser("install", help="printlab in einen KI-Client eintragen")
     s.add_argument("client", choices=["claude-desktop", "claude-code", "antigravity"])
     s.add_argument("--force", action="store_true", help="auch wenn die Claude-App läuft")
+    s.add_argument("--config", help="Pfad zur claude_desktop_config.json (Einstellungen → Entwickler zeigt ihn)")
     sub.add_parser("projects", help="Projekte auflisten")
     s = sub.add_parser("new", help="Projekt anlegen")
     s.add_argument("name")
@@ -217,7 +218,7 @@ def main(argv=None) -> int:
             return 0 if res["ok"] else 1
         elif a.cmd == "install":
             from .clients import install
-            _out(install(a.client, a.force))
+            _out(install(a.client, a.force, a.config))
         elif a.cmd == "projects":
             _out(pipeline.list_projects())
         elif a.cmd == "new":

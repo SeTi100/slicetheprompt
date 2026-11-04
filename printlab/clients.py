@@ -27,6 +27,7 @@ def server_entry() -> dict:
 
 def _claude_desktop_configs() -> list[Path]:
     """Alle Orte, an denen die Claude-Desktop-App ihre Konfiguration lesen kann.
+    Die App zeigt den Ort unter Einstellungen → Entwickler → Konfiguration bearbeiten.
     Store-Installation (MSIX): Windows leitet %APPDATA% je nach Version in
     %LOCALAPPDATA%\\Packages\\Claude_*\\LocalCache\\Roaming um – darum beide Orte."""
     paths: list[Path] = []
@@ -35,6 +36,8 @@ def _claude_desktop_configs() -> list[Path]:
         paths.append(Path(appdata) / "Claude" / "claude_desktop_config.json")
     local = os.environ.get("LOCALAPPDATA")
     if local:
+        # Store-Version (neuere Fassungen): %LOCALAPPDATA%\\Claude-Data\\claude_<id>\\
+        paths += sorted(Path(local, "Claude-Data").glob("*/claude_desktop_config.json"))
         for pkg in Path(local, "Packages").glob("Claude_*"):
             paths.append(pkg / "LocalCache" / "Roaming" / "Claude" / "claude_desktop_config.json")
     if not sys.platform.startswith("win"):
@@ -78,7 +81,7 @@ def _merge(path: Path, name: str, entry: dict) -> dict:
             "action": "aktualisiert" if before else "hinzugefügt"}
 
 
-def install(client: str, force: bool = False) -> dict:
+def install(client: str, force: bool = False, config: str | None = None) -> dict:
     entry = server_entry()
     if client == "claude-desktop":
         running = _claude_desktop_running()
@@ -89,7 +92,8 @@ def install(client: str, force: bool = False) -> dict:
             raise RuntimeError(
                 "Die Claude-Desktop-App läuft. Sie überschreibt ihre Konfiguration beim Beenden – "
                 "bitte die App ganz beenden (Infobereich → Beenden) und den Befehl wiederholen.")
-        res = [_merge(p, "printlab", entry) for p in _claude_desktop_configs()]
+        targets = [Path(config)] if config else _claude_desktop_configs()
+        res = [_merge(p, "printlab", entry) for p in targets]
         return {"client": client, "results": res, "next": "Claude-Desktop-App starten"}
     if client == "antigravity":
         p = Path.home() / ".gemini" / "config" / "mcp_config.json"
