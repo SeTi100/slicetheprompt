@@ -61,8 +61,25 @@ const controls = new OrbitControls(camera, canvas);
 controls.enableDamping = true;
 controls.dampingFactor = 0.08;
 controls.screenSpacePanning = true;
-controls.zoomSpeed = 0.28;
+controls.zoomSpeed = 1.6;
 controls.target.set(130, 130, 15);
+
+// Trackpad Wheel Normalization:
+// Laptop-Trackpads senden bei 2-Finger-Gesten oft winzige deltaY-Werte (DOM_DELTA_PIXEL),
+// wodurch OrbitControls im Standardmodus viel zu langsam skaliert.
+canvas.addEventListener(
+  "wheel",
+  (ev) => {
+    // Falls feine Pixel-Deltas vom Trackpad kommen, gezielt dynamisch verstärken
+    if (Math.abs(ev.deltaY) < 40 && ev.deltaMode === 0) {
+      const factor = ev.deltaY < 0 ? 0.92 : 1.08;
+      camera.position.sub(controls.target).multiplyScalar(factor).add(controls.target);
+      controls.update();
+      ev.preventDefault();
+    }
+  },
+  { passive: false }
+);
 
 // Lights
 const hemiLight = new THREE.HemisphereLight(0xdbeafe, 0x1e293b, 0.85);
