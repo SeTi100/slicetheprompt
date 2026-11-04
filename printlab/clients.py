@@ -41,10 +41,9 @@ def _claude_desktop_configs() -> list[Path]:
         home = Path.home()
         paths += [home / "Library/Application Support/Claude/claude_desktop_config.json",   # macOS
                   home / ".config/Claude/claude_desktop_config.json"]                        # Linux
-        paths = [p for p in paths if p.parent.exists()] or paths[:1]
-    else:
-        paths = [p for p in paths if p.parent.exists()] or paths[:1]
-    return paths
+    # Nur bestehende Dateien ergänzen – eine neu angelegte Datei kann die echte Konfiguration verdecken.
+    existing = [p for p in paths if p.exists() and p.stat().st_size > 0]
+    return existing or paths[:1]
 
 
 def _claude_desktop_running() -> bool | None:
