@@ -1,0 +1,38 @@
+# Von 'printlab applycal' geschrieben. Überlagert printer.yaml.
+materials:
+  pla:
+    hole_add: 0.3
+    pin_sub: -0.2
+    outer_offset: -0.1
+    z_offset: 0.083
+    accuracy: 0.35
+history:
+- date: '2026-11-04'
+  material: pla
+  measured:
+    block_x: 19.8
+    block_y: 19.85
+    block_z: 10.1
+    loch5: 4.75
+    loch8: 7.65
+    loch10: 9.7
+    stift8: 7.8
+    gesamt_x: 69.8
+    gesamt_y: 19.75
+    platte_z: 4.15
+    stift_h: 12.0
+  deviation:
+    block_x: -0.2
+    block_y: -0.15
+    block_z: 0.1
+    loch5: -0.25
+    loch8: -0.35
+    loch10: -0.3
+    stift8: -0.2
+    gesamt_x: -0.2
+    gesamt_y: -0.25
+    platte_z: 0.15
+    stift_h: 0.0
+  notes: 'Block-Ecken 19.9 (dicker als Wandmitte 19.8/19.85); Stift lokal Ring 7.9
+    auf Blockhöhe; Loch Ø8: 7.65 gemessen, Ø7.8 schabt am grössten Teil des Umfangs;
+    Loch Ø5: 4.7–4.8; Platte 4.15–4.2'

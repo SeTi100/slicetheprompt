@@ -64,6 +64,12 @@ def pin_d(d: float, material: str | None = None) -> float:
     return d - tol(material)["pin_sub"]
 
 
+def outer(size: float, material: str | None = None) -> float:
+    """Zu modellierendes Aussenmass, damit es gedruckt `size` misst (aus der Kalibrierung;
+    ohne Kalibrierung unverändert). Für Aussenmasse, die irgendwo hineinpassen müssen."""
+    return size - 2 * tol(material).get("outer_offset", 0.0)
+
+
 # ---------------------------------------------------------------- Körper zum Abziehen
 
 def hole_cut(d: float, depth: float, material: str | None = None):

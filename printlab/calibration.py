@@ -42,25 +42,42 @@ def create_calibration_project(material: str) -> dict:
     return p
 
 
-def apply_calibration(material: str, measured: dict[str, float]) -> dict:
+EXTRA_NOMINAL = {"gesamt_x": 70.0, "gesamt_y": 20.0, "platte_z": 4.0, "stift_h": 12.0}
+
+
+def apply_calibration(material: str, measured: dict[str, float], notes: str = "") -> dict:
+    """Messwerte des Testteils auswerten und config/calibration.yaml schreiben.
+
+    Pflicht: block_x, block_y, block_z, loch5, loch8, loch10, stift8.
+    Optional: gesamt_x, gesamt_y (Gesamtmasse 70 × 20), platte_z (4), stift_h (12).
+    Positive Abweichung = gedruckt grösser als modelliert."""
     cfg = load_config()
     mat = material_cfg(cfg, material)["name"]
     missing = [k for k in NOMINAL if k not in measured]
     if missing:
         raise ValueError(f"Fehlende Messwerte: {', '.join(missing)}")
-    m = {k: float(measured[k]) for k in NOMINAL}
-    dev = {k: round(m[k] - NOMINAL[k], 3) for k in NOMINAL}
-    hole_add = round(mean(-dev[k] for k in ("loch5", "loch8", "loch10")), 3)  # Löcher drucken meist zu klein
-    pin_sub = round(max(dev["stift8"], 0.0), 3)                                  # Stifte meist zu dick
-    outer = round(mean((dev["block_x"], dev["block_y"])) / 2, 3)                 # je Seite
+    nominal = {**NOMINAL, **{k: v for k, v in EXTRA_NOMINAL.items() if measured.get(k)}}
+    m = {k: float(measured[k]) for k in nominal}
+    dev = {k: round(m[k] - nominal[k], 3) for k in nominal}
+    # Löcher: modellierter Ø + hole_add → gedruckt Soll-Ø
+    hole_add = round(mean(-dev[k] for k in ("loch5", "loch8", "loch10")), 3)
+    # Stifte: modellierter Ø = Soll − pin_sub; negativ, wenn Stifte zu dünn drucken
+    pin_sub = round(dev["stift8"], 3)
+    # Aussenmasse: Abweichung je Seite (Mittel über alle gemessenen XY-Aussenmasse)
+    xy = [dev[k] for k in ("block_x", "block_y", "gesamt_x", "gesamt_y") if k in dev]
+    outer = round(mean(xy) / 2, 3)
+    z = [dev[k] for k in ("block_z", "platte_z", "stift_h") if k in dev]
+    z_dev = round(mean(z), 3)
     accuracy = round(max(abs(v) for v in dev.values()), 3)
     cal = _read_yaml(CALIBRATION_YAML)
     cal.setdefault("materials", {})
     entry = cal["materials"].get(mat, {})
     entry.update({"hole_add": max(hole_add, 0.0), "pin_sub": pin_sub, "outer_offset": outer,
-                  "accuracy": accuracy})
+                  "z_offset": z_dev, "accuracy": accuracy})
     cal["materials"][mat] = entry
-    cal.setdefault("history", []).append({"date": dt.date.today().isoformat(), "material": mat,
-                                          "measured": m, "deviation": dev})
+    hist = {"date": dt.date.today().isoformat(), "material": mat, "measured": m, "deviation": dev}
+    if notes:
+        hist["notes"] = notes
+    cal.setdefault("history", []).append(hist)
     write_yaml(CALIBRATION_YAML, cal, header="Von 'printlab applycal' geschrieben. Überlagert printer.yaml.")
     return {"material": mat, "deviation_mm": dev, "new": entry}

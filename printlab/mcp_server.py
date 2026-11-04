@@ -163,10 +163,15 @@ def calibration_part(material: str) -> dict:
 
 @server.tool()
 def apply_calibration(material: str, block_x: float, block_y: float, block_z: float,
-                      loch5: float, loch8: float, loch10: float, stift8: float) -> dict:
-    """Gemessene Werte (mm) des Testteils eintragen; schreibt config/calibration.yaml."""
-    return _safe(calibration.apply_calibration, material, dict(
-        block_x=block_x, block_y=block_y, block_z=block_z, loch5=loch5, loch8=loch8, loch10=loch10, stift8=stift8))
+                      loch5: float, loch8: float, loch10: float, stift8: float,
+                      gesamt_x: float = 0, gesamt_y: float = 0, platte_z: float = 0, stift_h: float = 0,
+                      notes: str = "") -> dict:
+    """Gemessene Werte (mm) des Testteils eintragen; schreibt config/calibration.yaml.
+    Optional (0 = nicht gemessen): gesamt_x/gesamt_y (Gesamtmasse 70 × 20), platte_z (4), stift_h (12).
+    notes: Auffälligkeiten (z. B. dickere Ecken)."""
+    vals = dict(block_x=block_x, block_y=block_y, block_z=block_z, loch5=loch5, loch8=loch8, loch10=loch10,
+                stift8=stift8, gesamt_x=gesamt_x, gesamt_y=gesamt_y, platte_z=platte_z, stift_h=stift_h)
+    return _safe(calibration.apply_calibration, material, {k: v for k, v in vals.items() if v}, notes)
 
 
 @server.tool()

@@ -17,7 +17,9 @@ Der Nutzer ist kein CAD-Profi: erkläre Masse und Annahmen in Alltagssprache.
 ## Feste Regeln
 1. Vor jedem neuen Teil `get_config` aufrufen oder `config/printer.yaml` lesen. Regeln und
    Toleranzen dort sind verbindlich; Toleranzen nie schätzen, sondern aus `lib.parts` nehmen
-   (`fit`, `hole_d`, `pin_d`, `screw_hole_cut`, `fit_hole_cut`, `nut_trap_cut`, …).
+   (`fit`, `hole_d`, `pin_d`, `outer`, `screw_hole_cut`, `fit_hole_cut`, `nut_trap_cut`, …).
+   Kalibriert (PLA, 4.11.2026): Löcher +0,30 mm auf Ø, Stifte +0,20 mm auf Ø (drucken zu dünn),
+   Aussenmasse −0,1 mm je Seite → für Aussenmasse, die irgendwo hineinpassen müssen, `outer(mass)`.
 2. Nur exakte Teile mit build123d. Kein Meshy, keine Netz-Generatoren.
 3. Ein Projekt je Auftrag: `project_new`, dann **spec.yaml** ausfüllen (Zweck, Material,
    Qualität, `bbox` = Soll-Aussenmasse, `masse` mit Herkunft, `annahmen`), dann **model.py**.
