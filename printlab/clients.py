@@ -26,30 +26,38 @@ def server_entry() -> dict:
 
 
 def _claude_desktop_configs() -> list[Path]:
-    paths = []
+    """Alle Orte, an denen die Claude-Desktop-App ihre Konfiguration lesen kann.
+    Store-Installation (MSIX): Windows leitet %APPDATA% je nach Version in
+    %LOCALAPPDATA%\\Packages\\Claude_*\\LocalCache\\Roaming um – darum beide Orte."""
+    paths: list[Path] = []
     appdata = os.environ.get("APPDATA")
     if appdata:
         paths.append(Path(appdata) / "Claude" / "claude_desktop_config.json")
     local = os.environ.get("LOCALAPPDATA")
-    if local:  # Installation aus dem Microsoft Store
-        paths += list(Path(local, "Packages").glob("*Claude*/LocalCache/Roaming/Claude/claude_desktop_config.json"))
-    home = Path.home()
-    paths += [home / "Library/Application Support/Claude/claude_desktop_config.json",   # macOS
-              home / ".config/Claude/claude_desktop_config.json"]                        # Linux
-    existing = [p for p in paths if p.exists()]
-    return existing or paths[:1]
+    if local:
+        for pkg in Path(local, "Packages").glob("Claude_*"):
+            paths.append(pkg / "LocalCache" / "Roaming" / "Claude" / "claude_desktop_config.json")
+    if not sys.platform.startswith("win"):
+        home = Path.home()
+        paths += [home / "Library/Application Support/Claude/claude_desktop_config.json",   # macOS
+                  home / ".config/Claude/claude_desktop_config.json"]                        # Linux
+        paths = [p for p in paths if p.parent.exists()] or paths[:1]
+    else:
+        paths = [p for p in paths if p.parent.exists()] or paths[:1]
+    return paths
 
 
-def _claude_desktop_running() -> bool:
+def _claude_desktop_running() -> bool | None:
+    """True/False; None, wenn es sich nicht feststellen lässt."""
     try:
         if sys.platform.startswith("win"):
             out = subprocess.run(["tasklist", "/FI", "IMAGENAME eq Claude.exe", "/NH"], capture_output=True,
-                                 text=True, timeout=10).stdout
-            return "Claude.exe" in out
-        out = subprocess.run(["pgrep", "-x", "Claude"], capture_output=True, text=True, timeout=10).stdout
+                                 timeout=10).stdout  # Bytes: Konsolen-Codepage ist nicht UTF-8
+            return b"claude.exe" in out.lower()
+        out = subprocess.run(["pgrep", "-x", "Claude"], capture_output=True, timeout=10).stdout
         return bool(out.strip())
     except Exception:
-        return False
+        return None
 
 
 def _merge(path: Path, name: str, entry: dict) -> dict:
@@ -74,7 +82,11 @@ def _merge(path: Path, name: str, entry: dict) -> dict:
 def install(client: str, force: bool = False) -> dict:
     entry = server_entry()
     if client == "claude-desktop":
-        if _claude_desktop_running() and not force:
+        running = _claude_desktop_running()
+        if running is None and not force:
+            raise RuntimeError("Konnte nicht prüfen, ob die Claude-App läuft. App ganz beenden und mit "
+                               "'--force' wiederholen.")
+        if running and not force:
             raise RuntimeError(
                 "Die Claude-Desktop-App läuft. Sie überschreibt ihre Konfiguration beim Beenden – "
                 "bitte die App ganz beenden (Infobereich → Beenden) und den Befehl wiederholen.")
