@@ -1,0 +1,31 @@
+{
+  "enabledMcpjsonServers": [
+    "printlab"
+  ],
+  "permissions": {
+    "allow": [
+      "mcp__printlab__project_new",
+      "mcp__printlab__project_list",
+      "mcp__printlab__build_and_check",
+      "mcp__printlab__check_report",
+      "mcp__printlab__render_views",
+      "mcp__printlab__cfs_status",
+      "mcp__printlab__list_filaments",
+      "mcp__printlab__filament_plan",
+      "mcp__printlab__slice",
+      "mcp__printlab__printer_status",
+      "mcp__printlab__get_config",
+      "mcp__printlab__calibration_part",
+      "Read(projects/**)",
+      "Edit(projects/**)",
+      "Write(projects/**)",
+      "Bash(uv run printlab:*)",
+      "Bash(uv run python:*)"
+    ],
+    "ask": [
+      "mcp__printlab__upload_and_print",
+      "mcp__printlab__print_control",
+      "mcp__printlab__apply_calibration"
+    ]
+  }
+}

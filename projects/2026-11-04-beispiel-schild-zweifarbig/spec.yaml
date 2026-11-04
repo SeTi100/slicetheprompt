@@ -1,0 +1,14 @@
+# Beispiel Mehrfarbdruck: Platte weiss, Schrift schwarz (Spulen werden aus dem CFS gewählt)
+name: beispiel-schild-zweifarbig
+beschreibung: "Schild 60 × 25 × 4 mm mit bündiger Schrift 'SLICE' in zweiter Farbe"
+material: pla
+qualitaet: standard
+menge: 1
+filament: {platte: weiss, schrift: schwarz}
+bbox: [60, 25, 4]
+bbox_tol: 0.05
+masse:
+  - "Platte 60 × 25 × 4 mm (Vorgabe)"
+  - "Schrift 10 mm hoch, 0,6 mm tief eingelegt = 3 Schichten"
+annahmen:
+  - "Schrift bündig mit der Oberseite, damit kein Überhang entsteht"

@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+.printlab/
+.mcp.json
+config/slicer/
+config/slicer.yaml
+projects/*/out/
+!projects/*/out/.gitkeep
+.claude/
+!claude-setup/
+*.gcode

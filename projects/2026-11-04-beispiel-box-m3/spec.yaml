@@ -1,0 +1,14 @@
+# Beispiel und Abnahmetest Phase 1: Box mit vier M3-Löchern im Boden
+name: beispiel-box-m3
+beschreibung: "Offene Box 60 × 40 × 15 mm, Wand und Boden 2 mm, 4 × M3-Durchgangsloch im Boden (Raster 50 × 30)"
+material: pla
+qualitaet: standard
+menge: 1
+bbox: [60, 40, 15]
+bbox_tol: 0.05
+masse:
+  - "Aussen 60 × 40 × 15 mm (Vorgabe)"
+  - "Wand 2,0 mm, Boden 2,0 mm (Funktionsteil ≥ 1,6 mm)"
+  - "M3-Loch modelliert Ø3,45 = 3,2 (ISO 273 fein) + 0,25 Zuschlag PLA"
+annahmen:
+  - "Unterkante mit 0,5-mm-Fase gegen Elefantenfuss"

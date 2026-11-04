@@ -1,0 +1,52 @@
+# Drucker, Regeln und Toleranzen. Claude liest diese Datei vor jedem Modell.
+# Gemessene Werte aus der Kalibrierung landen in calibration.yaml und überschreiben die Materialwerte hier.
+
+printer:
+  name: Creality Hi Combo
+  host: 192.168.0.27        # IP des Druckers (im Router fest vergeben)
+  port: 7125                # Moonraker
+  api_key: ""               # leer lassen, ausser Moonraker verlangt einen Schlüssel
+  nozzle: 0.4
+  bed: {x: 260, y: 260, z: 300}
+  usable: {x: 250, y: 250, z: 290}   # mit Rand zum Bauraum
+
+limits:                     # harte Grenzen, G-Code darüber wird nicht gestartet
+  max_nozzle_temp: 260
+  max_bed_temp: 85
+
+rules:                      # Geometrie-Regeln für 0.4-mm-Düse
+  line_width: 0.42
+  layer_height: 0.20
+  min_wall: 0.84            # 2 Linien – dünner wird lückenhaft (Fehler)
+  min_inlay: 0.4            # Farb-Einlagen/Schrift: mindestens 2 Schichten dick
+  functional_wall: 1.6      # Funktionsteile mindestens 4 Linien (Warnung)
+  min_feature: 0.8          # kleinstes horizontales Detail
+  min_hole: 2.0             # kleinere Löcher nachbohren
+  max_overhang_deg: 45      # Winkel zur Senkrechten ohne Stütze
+  max_bridge: 10            # mm Brücke ohne Stütze
+  bottom_chamfer: 0.5       # Fase an der Unterkante statt Rundung
+  min_bed_contact_mm2: 50
+  text_min_stroke: 0.6
+  text_min_depth: 0.6
+
+materials:                  # Startwerte, je Seite bzw. auf den Durchmesser in mm
+  pla:
+    clearance: 0.20         # Spielpassung je Seite
+    press: 0.05             # Presspassung je Seite
+    hole_add: 0.25          # Zuschlag auf Lochdurchmesser
+    pin_sub: 0.10           # Abzug auf Stiftdurchmesser
+    accuracy: 0.15          # erwartete Massgenauigkeit ±
+    nozzle_temp: [210, 220]
+    bed_temp: [55, 60]
+    fan: 100
+  petg:
+    clearance: 0.25
+    press: 0.10
+    hole_add: 0.30
+    pin_sub: 0.15
+    accuracy: 0.20
+    nozzle_temp: [235, 250]
+    bed_temp: [70, 80]
+    fan: 40
+
+default_material: pla
