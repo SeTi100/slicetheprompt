@@ -39,6 +39,14 @@ def main() -> int:
     out.mkdir(parents=True, exist_ok=True)
     for old in out.glob("body_*.stl"):
         old.unlink()
+    for old in out.glob("ghost_*.stl"):
+        old.unlink()
+    lp_pre = sys.modules.get("lib.parts")
+    if lp_pre:
+        if hasattr(lp_pre, "FEATURES"):
+            lp_pre.FEATURES.clear()
+        if hasattr(lp_pre, "WARNINGS"):
+            lp_pre.WARNINGS.clear()
     root = Path(__file__).resolve().parents[1]
     sys.path.insert(0, str(root))          # damit "from lib.parts import ..." geht
     sys.path.insert(0, str(model.parent))
@@ -104,8 +112,27 @@ def main() -> int:
                         v = 0.0
                     checks.append({"name": f"keine Überschneidung {names[i]} / {names[j]} (mm³)",
                                    "ist": round(v, 3), "soll": 0.0, "tol": 0.5, "ok": v <= 0.5})
-        result["checks"] = checks
         lp = sys.modules.get("lib.parts")
+        raw_features = list(getattr(lp, "FEATURES", []))
+        features_clean = []
+        for feat in raw_features:
+            f_clean = {k: v for k, v in feat.items() if k != "_shape"}
+            if feat.get("empty_cut"):
+                slug = _slug(feat["name"])
+                ghost_path = out / f"ghost_{slug}.stl"
+                if "_shape" in feat and feat["_shape"] is not None:
+                    export_stl(feat["_shape"], str(ghost_path), tolerance=0.01, angular_tolerance=0.1)
+                f_clean["ghost_stl"] = f"ghost_{slug}.stl"
+                checks.append({
+                    "name": f"Schnitt '{feat['name']}' trifft Körper",
+                    "ist": feat.get("removed_volume_mm3", 0.0),
+                    "soll": "> 0.01 mm³",
+                    "tol": 0.0,
+                    "ok": False,
+                })
+            features_clean.append(f_clean)
+        result["features"] = features_clean
+        result["checks"] = checks
         result["warnings"] = list(getattr(lp, "WARNINGS", [])) + list(ns.get("WARNINGS") or [])
 
         export_step(part, str(out / "model.step"))

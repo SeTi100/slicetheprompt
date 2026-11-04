@@ -11,6 +11,7 @@ import json
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import numpy as np
@@ -122,9 +123,21 @@ def build(project: str, timeout: int = 180) -> dict:
     d = project_dir(project)
     out = d / "out"
     out.mkdir(exist_ok=True)
-    for pat in ("model.stl", "model.step", "print*.stl", "render*.png", "report.json", "print.json", "body_*.stl"):
+    for pat in ("model.stl", "model.step", "print*.stl", "render*.png", "report.json", "print.json", "body_*.stl", "build.json", "ghost_*.stl"):
         for f in out.glob(pat):
-            f.unlink()
+            for _ in range(5):
+                try:
+                    f.unlink()
+                    break
+                except PermissionError:
+                    time.sleep(0.05)
+                except FileNotFoundError:
+                    break
+            else:
+                try:
+                    f.unlink(missing_ok=True)
+                except (PermissionError, OSError):
+                    pass
     try:
         proc = subprocess.run(
             [sys.executable, "-m", "printlab._cad_runner", str(d / "model.py"), str(out)],
@@ -133,6 +146,8 @@ def build(project: str, timeout: int = 180) -> dict:
         )
     except subprocess.TimeoutExpired:
         return {"ok": False, "error": f"Build nach {timeout} s abgebrochen (Geometrie zu komplex?)"}
+    if proc.returncode != 0:
+        return {"ok": False, "error": f"CAD Runner Fehler (Exit {proc.returncode}): {proc.stderr or proc.stdout}", "project": d.name}
     res = build_info(d) or {"ok": False, "error": "kein build.json erzeugt"}
     if not res.get("ok"):
         res["stderr"] = proc.stderr[-3000:]
@@ -177,7 +192,31 @@ def prepare(project: str, orientation: str = "wie modelliert") -> dict:
         f = d / "out" / f"print_{body_slug(n)}.stl"
         write_stl(f, t, header=f"printlab {d.name} {n}")
         files[n] = str(f)
-    info = {"orientation": orientation, "candidates": scores, "bodies": files}
+
+    # Ghost-STLs verfehlter Schnitte in Drucklage transformieren
+    for old_gp in (d / "out").glob("ghost_*_print.stl"):
+        try:
+            old_gp.unlink()
+        except (PermissionError, OSError):
+            pass
+    ghost_files = {}
+    for g_path in sorted((d / "out").glob("ghost_*.stl")):
+        if g_path.name.endswith("_print.stl"):
+            continue
+        g_tris = read_stl(g_path)
+        g_placed = mc.rotate(g_tris, R) + shift
+        out_ghost = d / "out" / f"{g_path.stem}_print.stl"
+        write_stl(out_ghost, g_placed, header=f"printlab {d.name} {g_path.stem}")
+        ghost_files[g_path.stem] = str(out_ghost)
+
+    info = {
+        "orientation": orientation,
+        "candidates": scores,
+        "bodies": files,
+        "rotation_matrix": R.tolist(),
+        "shift": [float(v) for v in shift],
+        "ghosts": ghost_files,
+    }
     (d / "out" / "print.json").write_text(json.dumps(info, indent=2, ensure_ascii=False), encoding="utf-8")
     return {"print_stl": str(d / "out" / "print.stl"), **info}
 
@@ -232,6 +271,10 @@ def check(project: str) -> dict:
     }
     (out / "report.json").write_text(json.dumps(report, indent=2, ensure_ascii=False, default=float),
                                      encoding="utf-8")
+    print_tris = read_stl(out / "print.stl")
+    diag = mc.diagnostics_3d(print_tris, cfg, build_data=bi, print_info=po)
+    (out / "diagnostics_3d.json").write_text(json.dumps(diag, indent=2, ensure_ascii=False, default=float),
+                                             encoding="utf-8")
     return report
 
 
@@ -270,7 +313,7 @@ def render(project: str, which: str = "print", colors: dict | None = None) -> di
     return {"png": str(png)}
 
 
-def run_all(project: str, orientation: str | None = None) -> dict:
+def run_all(project: str, orientation: str | None = None, reason: str = "build_and_check") -> dict:
     """Bauen, (optional) Lage wählen, prüfen, rendern – ein Durchlauf."""
     b = build(project)
     if not b.get("ok"):
@@ -278,9 +321,12 @@ def run_all(project: str, orientation: str | None = None) -> dict:
     p = prepare(project, orientation or "wie modelliert")
     r = check(project)
     img = render(project)
+    from . import history
+    snap = history.save_snapshot(project, reason=reason)
     return {"stage": "done",
             "build": {k: b.get(k) for k in ("size_mm", "volume_mm3", "solids", "valid", "checks", "bodies")},
-            "orientation": p["orientation"], "report": _short(r), "png": img["png"]}
+            "orientation": p["orientation"], "report": _short(r), "png": img["png"],
+            "version": snap["version"]}
 
 
 def _short(r: dict) -> dict:

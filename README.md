@@ -77,6 +77,7 @@ printlab liest das CFS über Moonraker: Platz (T1A–T4D), Material, Farbe, Rest
 ## Ohne Claude (Kommandozeile)
 
 ```powershell
+uv run printlab ui                       # printlab Studio (3D-Viewer, Fehler-Overlays, Versionen & Markierung)
 uv run printlab new halter --material petg
 uv run printlab run <projekt>            # bauen, prüfen, rendern
 uv run printlab slice <projekt>          # gibt einen Freigabe-Token aus

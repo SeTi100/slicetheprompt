@@ -6,6 +6,7 @@ Alles mit numpy/scipy, damit es ohne weitere Geometrie-Bibliotheken läuft.
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass, field, asdict
 
 import numpy as np
@@ -484,3 +485,277 @@ def analyse_bodies(bodies: dict, cfg: dict, spec: dict | None = None, print_bodi
                 st["overhang_mm2_without_ok_bridges"] < 1.0,
                 f"{st['overhang_mm2_without_ok_bridges']:.0f} mm²", "0 mm² oder Stützen", severity="warn")
     return rep
+
+
+# ---------------------------------------------------------------- 3D-Fehlerdiagnostik & Feature-Tagging
+
+def _slug(s: str) -> str:
+    s = s.lower()
+    for a, b in (("ä", "ae"), ("ö", "oe"), ("ü", "ue"), ("ß", "ss")):
+        s = s.replace(a, b)
+    return re.sub(r"[^a-z0-9]+", "_", s).strip("_") or "koerper"
+
+
+def diagnostics_3d(print_tris: np.ndarray, cfg: dict, build_data: dict | None = None,
+                   print_info: dict | None = None) -> dict:
+    """Berechnet dreiecksgenaue 3D-Problemzonen, Kantenfehler und Feature-Bounding-Boxes in Druckbett-
+    und Modellkoordinaten inkl. Transformationsmatrix R und Shift s."""
+    rules = cfg.get("rules", {})
+    min_wall = float(rules.get("min_wall", 0.84))
+    max_overhang_deg = float(rules.get("max_overhang_deg", 45.0))
+    max_bridge = float(rules.get("max_bridge", 10.0))
+
+    if print_info and "rotation_matrix" in print_info and "shift" in print_info:
+        R = np.array(print_info["rotation_matrix"], dtype=float)
+        s = np.array(print_info["shift"], dtype=float)
+    else:
+        R = np.eye(3)
+        s = np.zeros(3)
+
+    def _to_model(pts_p: np.ndarray) -> np.ndarray:
+        return (pts_p - s) @ R
+
+    def _to_print(pts_m: np.ndarray) -> np.ndarray:
+        return pts_m @ R.T + s
+
+    def _calc_bbox_and_center(tri_indices_list: list[int] | np.ndarray):
+        pts_p = print_tris[tri_indices_list].reshape(-1, 3)
+        mn_p = pts_p.min(axis=0)
+        mx_p = pts_p.max(axis=0)
+        bbox_p = [round(float(v), 4) for v in np.concatenate([mn_p, mx_p])]
+        center_p = [round(float(v), 4) for v in (mn_p + mx_p) / 2.0]
+
+        pts_m = _to_model(pts_p)
+        mn_m = pts_m.min(axis=0)
+        mx_m = pts_m.max(axis=0)
+        bbox_m = [round(float(v), 4) for v in np.concatenate([mn_m, mx_m])]
+        center_m = [round(float(v), 4) for v in (mn_m + mx_m) / 2.0]
+        return bbox_p, bbox_m, center_p, center_m
+
+    if len(print_tris) == 0:
+        return {
+            "transform": {
+                "rotation_matrix": R.tolist(),
+                "shift": [round(float(v), 4) for v in s],
+            },
+            "thin_walls": [],
+            "overhangs": [],
+            "bad_bridges": [],
+            "open_edges": [],
+            "floating_parts": [],
+            "features": [],
+        }
+
+    verts, faces = weld(print_tris)
+    areas = face_areas(print_tris)
+    normals = face_normals(print_tris)
+    valid_tri_mask = areas > 1e-9
+
+    # 1. Dünne Wände
+    thin_walls = []
+    thin_threshold = min_wall
+    centers = print_tris.mean(axis=1)
+    d = -normals
+    origins = centers + d * 1e-4
+    dist = _ray_hits_local(origins, d, print_tris, maxlen=8.0)
+    thin_mask = (dist < thin_threshold) & valid_tri_mask
+
+    if faces is not None and thin_mask.any():
+        for grp in face_adjacency_components(faces, thin_mask):
+            grp_area = float(areas[grp].sum())
+            if grp_area < 0.5:
+                continue
+            min_thick = float(dist[grp].min())
+            bbox_p, bbox_m, cen_p, cen_m = _calc_bbox_and_center(grp)
+            thin_walls.append({
+                "id": f"thin_{len(thin_walls) + 1}",
+                "kind": "thin_wall",
+                "severity": "error",
+                "label": f"Wand zu dünn ({min_thick:.2f} mm < {thin_threshold:.2f} mm)",
+                "bbox_print": bbox_p,
+                "bbox_model": bbox_m,
+                "center_print": cen_p,
+                "center_model": cen_m,
+                "tri_indices": [int(idx) for idx in grp],
+            })
+
+    # 2. Überhänge & Brücken
+    zmin = print_tris[:, :, 2].min()
+    on_bed = (print_tris[:, :, 2].max(axis=1) < zmin + 0.05) & (normals[:, 2] < -0.99)
+    thr = -math.sin(math.radians(max_overhang_deg + 1.0))
+    down = (normals[:, 2] < thr) & ~on_bed & valid_tri_mask
+
+    up_idx = np.nonzero(normals[:, 2] > 0.5)[0]
+    if down.any() and len(up_idx):
+        di = np.nonzero(down)[0]
+        cen = centers[di] + np.array([0, 0, 0.05])
+        d_down = _ray_hits_local(cen, np.tile([0.0, 0.0, -1.0], (len(di), 1)), print_tris[up_idx], maxlen=0.2)
+        supported = np.zeros(len(print_tris), bool)
+        supported[di[d_down <= 0.1]] = True
+        down &= ~supported
+
+    flat_down = (normals[:, 2] < -0.99) & down
+    bad_bridges = []
+    handled_bridge_tris = np.zeros(len(print_tris), bool)
+
+    if faces is not None and flat_down.any():
+        emap = _edge_faces(faces)
+        for grp in face_adjacency_components(faces, flat_down):
+            grp_area = float(areas[grp].sum())
+            if grp_area < 0.5:
+                continue
+            span = _bridge_span(print_tris, faces, grp, emap)
+            handled_bridge_tris[grp] = True
+            if span > max_bridge:
+                bbox_p, bbox_m, cen_p, cen_m = _calc_bbox_and_center(grp)
+                bad_bridges.append({
+                    "id": f"bridge_{len(bad_bridges) + 1}",
+                    "kind": "bad_bridge",
+                    "severity": "warn",
+                    "label": f"Brücke zu lang ({span:.1f} mm > {max_bridge:.1f} mm)",
+                    "bbox_print": bbox_p,
+                    "bbox_model": bbox_m,
+                    "center_print": cen_p,
+                    "center_model": cen_m,
+                    "tri_indices": [int(idx) for idx in grp],
+                })
+
+    overhang_mask = down & ~handled_bridge_tris
+    overhangs = []
+    if faces is not None and overhang_mask.any():
+        for grp in face_adjacency_components(faces, overhang_mask):
+            grp_area = float(areas[grp].sum())
+            if grp_area < 0.2:
+                continue
+            bbox_p, bbox_m, cen_p, cen_m = _calc_bbox_and_center(grp)
+            overhangs.append({
+                "id": f"overhang_{len(overhangs) + 1}",
+                "kind": "overhang",
+                "severity": "warn",
+                "label": f"Kritischer Überhang (> {max_overhang_deg:.0f}°)",
+                "bbox_print": bbox_p,
+                "bbox_model": bbox_m,
+                "center_print": cen_p,
+                "center_model": cen_m,
+                "tri_indices": [int(idx) for idx in grp],
+            })
+
+    # 3. Offene Kanten / Nonmanifold
+    open_edges = []
+    e = np.concatenate([faces[:, [0, 1]], faces[:, [1, 2]], faces[:, [2, 0]]])
+    und = np.sort(e, axis=1)
+    uniq, counts = np.unique(und, axis=0, return_counts=True)
+    open_edges_mask = (counts == 1) | (counts > 2)
+    bad_edges = uniq[open_edges_mask]
+    if len(bad_edges) > 0:
+        capped_edges = bad_edges[:500]
+        p1 = verts[capped_edges[:, 0]]
+        p2 = verts[capped_edges[:, 1]]
+        edges_segments = [
+            [[round(float(c), 4) for c in p1[i]], [round(float(c), 4) for c in p2[i]]]
+            for i in range(len(capped_edges))
+        ]
+        all_pts = np.concatenate([p1, p2])
+        mn_p = all_pts.min(axis=0)
+        mx_p = all_pts.max(axis=0)
+        pts_m = _to_model(all_pts)
+        mn_m = pts_m.min(axis=0)
+        mx_m = pts_m.max(axis=0)
+
+        edge_set = set((int(min(a, b)), int(max(a, b))) for a, b in capped_edges)
+        tri_idxs = []
+        for fi, f in enumerate(faces):
+            for e0, e1 in ((f[0], f[1]), (f[1], f[2]), (f[2], f[0])):
+                if (int(min(e0, e1)), int(max(e0, e1))) in edge_set:
+                    tri_idxs.append(fi)
+                    break
+
+        open_edges.append({
+            "id": "open_edge_1",
+            "kind": "open_edge",
+            "severity": "error",
+            "label": f"{len(bad_edges)} offene / nicht-manifolde Kanten",
+            "edges": edges_segments,
+            "bbox_print": [round(float(v), 4) for v in np.concatenate([mn_p, mx_p])],
+            "bbox_model": [round(float(v), 4) for v in np.concatenate([mn_m, mx_m])],
+            "center_print": [round(float(v), 4) for v in (mn_p + mx_p) / 2.0],
+            "center_model": [round(float(v), 4) for v in (mn_m + mx_m) / 2.0],
+            "tri_indices": tri_idxs,
+        })
+
+    # 4. Schwebende Körper
+    floating_parts = []
+    labels = components(faces)
+    n_comp = int(labels.max()) + 1 if len(labels) else 0
+    if n_comp > 1:
+        z_bed = float(print_tris[:, :, 2].min())
+        for k in range(n_comp):
+            comp_idx = np.nonzero(labels == k)[0]
+            comp_zmin = float(print_tris[comp_idx, :, 2].min())
+            if comp_zmin > z_bed + 0.05:
+                bbox_p, bbox_m, cen_p, cen_m = _calc_bbox_and_center(comp_idx)
+                floating_parts.append({
+                    "id": f"float_{len(floating_parts) + 1}",
+                    "kind": "floating_part",
+                    "severity": "error",
+                    "label": f"Schwebender Körper (z_min = {comp_zmin:.2f} mm > {z_bed:.2f} mm)",
+                    "bbox_print": bbox_p,
+                    "bbox_model": bbox_m,
+                    "center_print": cen_p,
+                    "center_model": cen_m,
+                    "tri_indices": [int(idx) for idx in comp_idx],
+                })
+
+    # 5. Features (transformiert)
+    features = []
+    if build_data and "features" in build_data:
+        for feat in build_data["features"]:
+            name = feat.get("name", "")
+            role = feat.get("role", "feature")
+            x0, y0, z0 = feat["bbox_min"]
+            x1, y1, z1 = feat["bbox_max"]
+            corners_m = np.array([
+                [x0, y0, z0], [x0, y0, z1], [x0, y1, z0], [x0, y1, z1],
+                [x1, y0, z0], [x1, y0, z1], [x1, y1, z0], [x1, y1, z1],
+            ], dtype=float)
+            corners_p = _to_print(corners_m)
+            mn_p = corners_p.min(axis=0)
+            mx_p = corners_p.max(axis=0)
+            bbox_p = [round(float(v), 4) for v in np.concatenate([mn_p, mx_p])]
+            bbox_m = [round(float(v), 4) for v in [x0, y0, z0, x1, y1, z1]]
+            c_m = feat.get("center") or [(x0 + x1) / 2.0, (y0 + y1) / 2.0, (z0 + z1) / 2.0]
+            center_m = [round(float(v), 4) for v in c_m]
+            center_p = [round(float(v), 4) for v in _to_print(np.array(c_m, dtype=float))]
+
+            f_entry = {
+                "name": name,
+                "role": role,
+                "bbox_model": bbox_m,
+                "bbox_print": bbox_p,
+                "center_model": center_m,
+                "center_print": center_p,
+            }
+            if feat.get("empty_cut"):
+                f_entry["empty_cut"] = True
+                slug = _slug(name)
+                f_entry["ghost_stl"] = f"ghost_{slug}_print.stl"
+            if "cutter_volume_mm3" in feat:
+                f_entry["cutter_volume_mm3"] = feat["cutter_volume_mm3"]
+            if "removed_volume_mm3" in feat:
+                f_entry["removed_volume_mm3"] = feat["removed_volume_mm3"]
+            if "volume_mm3" in feat:
+                f_entry["volume_mm3"] = feat["volume_mm3"]
+            features.append(f_entry)
+
+    return {
+        "transform": {
+            "rotation_matrix": R.tolist(),
+            "shift": [round(float(v), 4) for v in s],
+        },
+        "thin_walls": thin_walls,
+        "overhangs": overhangs,
+        "bad_bridges": bad_bridges,
+        "open_edges": open_edges,
+        "floating_parts": floating_parts,
+        "features": features,
+    }

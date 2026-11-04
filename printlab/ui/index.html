@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>printlab Studio – 3D Inspektion, Markierung &amp; Versionierung</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "/vendor/three.module.min.js"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="app-shell">
+    <!-- ==================== LEFT SIDEBAR: PROJEKTE & VERSIONEN ==================== -->
+    <aside id="left-sidebar" class="panel">
+      <div class="brand-bar">
+        <div class="brand-logo">
+          <span class="cube-icon">◈</span>
+          <div>
+            <div class="brand-title">printlab <span class="accent">Studio</span></div>
+            <div class="brand-sub">Creality Hi · 3D-Prüfstand</div>
+          </div>
+        </div>
+        <span id="sse-indicator" class="live-dot" title="Live-Synchronisation aktiv"></span>
+      </div>
+
+      <div class="section-block">
+        <div class="section-header">
+          <label for="project-select">Projekt</label>
+          <button id="btn-refresh-projects" class="icon-btn" title="Projektliste aktualisieren">↻</button>
+        </div>
+        <select id="project-select" class="select-input"></select>
+        <div id="project-summary" class="project-summary">
+          <span id="project-status-badge" class="badge badge-neutral">–</span>
+          <span id="project-dims-text" class="mono-dim">–</span>
+        </div>
+      </div>
+
+      <div class="section-block flex-grow">
+        <div class="section-header">
+          <span>Versions-Historie</span>
+          <button id="btn-open-diff" class="btn-xs" title="Code-Diff zwischen Versionen anzeigen">⇄ Code-Diff</button>
+        </div>
+        <div id="ghost-active-banner" class="ghost-banner hidden">
+          <span>Geisterbild: <strong id="ghost-version-label">–</strong></span>
+          <button id="btn-clear-ghost" class="btn-xs">Ausblenden</button>
+        </div>
+        <div id="version-list" class="version-list"></div>
+      </div>
+    </aside>
+
+    <!-- ==================== CENTER: 3D VIEWPORT & TOOLBAR ==================== -->
+    <main id="viewport-area">
+      <header id="viewport-toolbar">
+        <div class="tool-group" role="group" aria-label="Werkzeuge">
+          <button class="tool-btn active" data-tool="orbit" title="Ansicht drehen / verschieben [Taste 1]">
+            <span class="tool-key">1</span> Drehen
+          </button>
+          <button class="tool-btn" data-tool="pin" title="Punkt oder Feature auf Bauteil markieren [Taste 2]">
+            <span class="tool-key">2</span> 📍 Pin
+          </button>
+          <button class="tool-btn" data-tool="box" title="3D-Bereichsbox über Problemzone aufziehen (2 Klicks) [Taste 3]">
+            <span class="tool-key">3</span> ⬚ Bereichsbox
+          </button>
+          <button class="tool-btn" data-tool="move" title="Verschiebepfeil Von → Nach setzen (2 Klicks) [Taste 4]">
+            <span class="tool-key">4</span> ➔ Von→Nach
+          </button>
+          <button class="tool-btn" data-tool="measure" title="2-Punkt-Abstand &amp; ΔX/ΔY/ΔZ messen [Taste 5]">
+            <span class="tool-key">5</span> 📏 Messen
+          </button>
+        </div>
+
+        <div class="toolbar-divider"></div>
+
+        <div class="tool-group" role="group" aria-label="Koordinatenraum">
+          <button id="btn-space-print" class="seg-btn active" title="Drucklage auf dem 260×260-mm-Bett">Druckbett</button>
+          <button id="btn-space-model" class="seg-btn" title="Modellkoordinaten aus model.py (Ursprung 0,0,0)">Modell (0,0,0)</button>
+        </div>
+
+        <div class="toolbar-divider"></div>
+
+        <div class="tool-group" role="group" aria-label="Overlays">
+          <label class="toggle-pill" title="3D-Fehlerzonen (dünne Wände, Überhänge, leere Schnitte) einblenden">
+            <input type="checkbox" id="chk-overlay-errors" checked />
+            <span>Fehler-Zonen</span>
+          </label>
+          <label class="toggle-pill" title="Benannte CAD-Features (tag / cut_feature) als Rahmen anzeigen">
+            <input type="checkbox" id="chk-overlay-features" />
+            <span>Features</span>
+          </label>
+          <label class="toggle-pill" title="Scharfe Bauteilkanten (15°) nachzeichnen">
+            <input type="checkbox" id="chk-overlay-edges" checked />
+            <span>Kanten</span>
+          </label>
+        </div>
+
+        <div class="toolbar-divider"></div>
+
+        <div class="tool-group clip-group" aria-label="Schnittebene">
+          <span class="clip-label">Schnitt:</span>
+          <select id="clip-axis" class="select-xs">
+            <option value="off">Aus</option>
+            <option value="z">Z-Ebene</option>
+            <option value="y">Y-Ebene</option>
+            <option value="x">X-Ebene</option>
+          </select>
+          <input type="range" id="clip-slider" min="0" max="100" value="50" class="range-xs" disabled />
+          <label class="flip-chk" title="Schnittrichtung umkehren">
+            <input type="checkbox" id="clip-flip" disabled />
+            <span>⇄</span>
+          </label>
+        </div>
+      </header>
+
+      <div id="historical-banner" class="historical-banner hidden">
+        <span>Du betrachtest Archiv-Version <strong id="hist-banner-ver">v001</strong> (schreibgeschützt).</span>
+        <div class="banner-actions">
+          <button id="btn-banner-restore" class="btn-xs btn-amber">Diese Version wiederherstellen</button>
+          <button id="btn-banner-live" class="btn-xs">Zurück zum aktuellen Stand</button>
+        </div>
+      </div>
+
+      <div id="tool-hint-bar" class="tool-hint hidden"></div>
+
+      <div id="canvas-container">
+        <canvas id="three-canvas"></canvas>
+        <div id="labels-layer"></div>
+
+        <!-- Kamera-Schnellansichten -->
+        <div id="cam-bar">
+          <button data-cam="iso" title="Isometrisch">Iso</button>
+          <button data-cam="top" title="Von oben (+Z)">Oben</button>
+          <button data-cam="front" title="Von vorne (-Y)">Vorne</button>
+          <button data-cam="right" title="Von rechts (+X)">Rechts</button>
+          <button data-cam="left" title="Von links (-X)">Links</button>
+          <button data-cam="back" title="Von hinten (+Y)">Hinten</button>
+          <button data-cam="bottom" title="Von unten (-Z)">Unten</button>
+          <button data-cam="fit" title="Auf Bauteil zentrieren">⌖ Fit</button>
+        </div>
+
+        <!-- Live-Koordinaten unter dem Mauszeiger -->
+        <div id="cursor-readout" class="cursor-readout">
+          <span class="axis-tag x">X</span><span id="cur-x">–</span>
+          <span class="axis-tag y">Y</span><span id="cur-y">–</span>
+          <span class="axis-tag z">Z</span><span id="cur-z">–</span>
+          <span id="cur-space-label" class="cur-meta">(Modell mm)</span>
+          <span id="cur-feature-label" class="cur-feat"></span>
+        </div>
+
+        <!-- Legende für Farben & Overlays -->
+        <div id="scene-legend" class="scene-legend"></div>
+      </div>
+    </main>
+
+    <!-- ==================== RIGHT SIDEBAR: TABS ==================== -->
+    <aside id="right-sidebar" class="panel">
+      <nav class="tab-bar">
+        <button class="tab-btn active" data-tab="diagnose">
+          Diagnose &amp; Markierung <span id="badge-issues-count" class="tab-pill hidden">0</span>
+        </button>
+        <button class="tab-btn" data-tab="params">Parameter</button>
+        <button class="tab-btn" data-tab="specs">Checks &amp; Spec</button>
+      </nav>
+
+      <!-- TAB 1: DIAGNOSE & MARKIERUNG -->
+      <section id="tab-diagnose" class="tab-pane active">
+        <div class="pane-section">
+          <div class="section-header">
+            <span>Automatische 3D-Prüfung</span>
+            <button id="btn-rebuild-now" class="btn-xs" title="Projekt neu bauen &amp; prüfen">↻ Neu prüfen</button>
+          </div>
+          <div id="diagnostics-list" class="diag-list"></div>
+        </div>
+
+        <div class="pane-section">
+          <div class="section-header">
+            <span>Deine 3D-Markierungen (<span id="ann-count">0</span>)</span>
+            <button id="btn-clear-annotations" class="btn-xs" title="Alle ungespeicherten Pins/Boxen leeren">Leeren</button>
+          </div>
+          <div id="measure-box" class="measure-readout hidden"></div>
+          <div id="annotations-list" class="ann-list"></div>
+
+          <div class="feedback-compose">
+            <label for="general-note" class="field-label">Gesamthinweis für Antigravity / Claude</label>
+            <textarea id="general-note" rows="2" placeholder="z. B. Mittelwand um 90° drehen und markierte Bohrung nach innen schieben …"></textarea>
+
+            <div id="saved-feedback-pill" class="saved-fb-bar hidden">
+              <span>✓ Offenes Feedback für Agent bereit</span>
+              <button id="btn-delete-saved-fb" class="btn-xs btn-danger" title="Gespeichertes ui_feedback.json löschen">Erledigt</button>
+            </div>
+
+            <button id="btn-save-feedback" class="btn-primary full-width">
+              📤 Markierung speichern &amp; Agent-Prompt kopieren
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 2: PARAMETER-EDITOR (AST) -->
+      <section id="tab-params" class="tab-pane">
+        <div class="pane-section">
+          <div class="section-header">
+            <span>Druckorientierung</span>
+          </div>
+          <select id="orientation-select" class="select-input"></select>
+        </div>
+
+        <div class="pane-section">
+          <div class="section-header">
+            <span>CAD-Parameter (<code>model.py</code>)</span>
+            <button id="btn-reset-params" class="btn-xs">Zurücksetzen</button>
+          </div>
+          <p class="hint-text">Ändert Zahlen direkt per AST in <code>model.py</code> und erzeugt sofort eine neue Version.</p>
+          <div id="params-form" class="params-form"></div>
+          <button id="btn-apply-params" class="btn-primary full-width">
+            ⚡ Sofort neu bauen (ohne KI)
+          </button>
+        </div>
+      </section>
+
+      <!-- TAB 3: CHECKS & SPEZIFIKATION -->
+      <section id="tab-specs" class="tab-pane">
+        <div class="pane-section">
+          <div class="section-header">
+            <span>Funktionsmaße &amp; Druckregeln</span>
+          </div>
+          <div id="checks-table-wrap"></div>
+        </div>
+
+        <div class="pane-section">
+          <div class="section-header">
+            <span>Spezifikation (<code>spec.yaml</code>)</span>
+          </div>
+          <div id="spec-details" class="spec-details"></div>
+        </div>
+
+        <div class="pane-section">
+          <div class="section-header">
+            <span>2D-Kontrollansicht &amp; <code>model.py</code></span>
+          </div>
+          <div id="render-preview-wrap" class="render-preview-wrap"></div>
+          <details class="code-details">
+            <summary>Quellcode <code>model.py</code> anzeigen</summary>
+            <pre id="model-code-view" class="code-block"></pre>
+          </details>
+        </div>
+      </section>
+    </aside>
+
+    <!-- ==================== BOTTOM STATUS BAR ==================== -->
+    <footer id="status-bar">
+      <div class="status-left">
+        <span id="printer-conn-dot" class="conn-dot offline"></span>
+        <strong id="printer-state-text">Drucker wird abgefragt …</strong>
+        <span id="printer-temps-text" class="status-muted"></span>
+      </div>
+      <div id="cfs-slots-bar" class="cfs-bar"></div>
+      <div class="status-right">
+        <span class="safety-note">🔒 Rein lesend – Druckstart nur im Chat</span>
+      </div>
+    </footer>
+  </div>
+
+  <!-- ==================== CODE DIFF MODAL ==================== -->
+  <div id="diff-modal" class="modal-backdrop hidden">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>Versions-Vergleich (<code>model.py</code>)</h3>
+        <button id="btn-close-diff" class="icon-btn">✕</button>
+      </div>
+      <div class="modal-controls">
+        <label>Alt: <select id="diff-old-select" class="select-xs"></select></label>
+        <span>→</span>
+        <label>Neu: <select id="diff-new-select" class="select-xs"></select></label>
+        <span id="diff-meta-delta" class="mono-dim"></span>
+      </div>
+      <pre id="diff-content" class="diff-viewer"></pre>
+    </div>
+  </div>
+
+  <div id="toast-container"></div>
+  <div id="busy-overlay" class="busy-overlay hidden">
+    <div class="spinner"></div>
+    <div id="busy-text">CAD-Modell wird neu gebaut &amp; geprüft …</div>
+  </div>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

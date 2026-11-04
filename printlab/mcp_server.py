@@ -180,6 +180,39 @@ def get_config() -> dict:
     return _safe(_c)
 
 
+@server.tool()
+def get_ui_feedback(project: str = "") -> dict:
+    """Liest das vom Nutzer in printlab Studio (3D-GUI) gespeicherte räumliche Feedback
+    (Pins, Bereichsboxen, Von->Nach-Verschiebepfeile in Modellkoordinaten `model_xyz` sowie
+    den Pfad zum markierten Screenshot `out/ui_feedback.png`).
+    Falls `project` leer ist, wird das zuletzt markierte Projekt zurückgegeben.
+    Danach `screenshot` mit Read/read_file ansehen und nach erfolgreichem Umbau `clear_ui_feedback` aufrufen."""
+    from .ui_server import read_project_feedback
+    return _safe(read_project_feedback, project)
+
+
+@server.tool()
+def clear_ui_feedback(project: str) -> dict:
+    """Löscht erledigtes 3D-UI-Feedback (`out/ui_feedback.json` + `out/ui_feedback.png`) nach erfolgreichem Umbau."""
+    from .config import project_dir
+    from .ui_server import clear_project_feedback
+    return _safe(lambda: clear_project_feedback(project_dir(project)))
+
+
+@server.tool()
+def version_list(project: str) -> dict:
+    """Listet alle gespeicherten Versions-Snapshots (`v001`, `v002`, ...) eines Projekts auf."""
+    from . import history
+    return _safe(history.list_versions, project)
+
+
+@server.tool()
+def version_restore(project: str, version: str) -> dict:
+    """Stellt eine ältere Projektversion (`v001`, `v002`, ...) wieder her und führt Build + Prüfung aus."""
+    from . import history
+    return _safe(history.restore_version, project, version)
+
+
 def main() -> None:
     if hasattr(sys.stderr, "reconfigure"):
         sys.stderr.reconfigure(encoding="utf-8")

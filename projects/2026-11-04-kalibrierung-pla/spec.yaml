@@ -1,0 +1,17 @@
+# Spezifikation – von Claude aus dem Prompt erstellt, von dir geprüft.
+name: kalibrierung-pla
+beschreibung: "Toleranz-Testteil"
+material: pla        # pla | petg
+qualitaet: standard         # fein (0.12) | standard (0.20) | grob (0.28)
+menge: 1
+# Filament/Spule: leer = passende Spule automatisch (meiste Restmenge).
+#   einfarbig:  filament: T1C        oder  filament: schwarz   oder  filament: "#FF0000"
+#   mehrfarbig: filament: {grundkoerper: weiss, schrift: T1D}   (Schlüssel = Namen in bodies)
+filament: null
+# Soll-Aussenmasse (Bounding Box im Modell-Koordinatensystem) in mm, wird automatisch geprüft
+bbox: [70, 20, 12]                  # z. B. [72.5, 36.5, 40]
+bbox_tol: 0.05
+# wichtige Masse und woher sie kommen
+masse: []
+# Annahmen, die Claude getroffen hat
+annahmen: []

@@ -9,3 +9,4 @@ projects/*/out/
 .claude/
 !claude-setup/
 *.gcode
+projects/*/history/

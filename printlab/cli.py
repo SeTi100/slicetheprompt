@@ -30,13 +30,33 @@ def _cube_stl(path: Path, a: float = 20.0) -> Path:
     return path
 
 
-def write_mcp_json() -> Path:
+def write_mcp_json() -> list[Path]:
     from .config import ROOT
+    entry = {
+        "command": sys.executable,
+        "args": ["-m", "printlab.mcp_server"],
+        "env": {
+            "PYTHONPATH": str(ROOT),
+            "PYTHONIOENCODING": "utf-8",
+            "PYTHONUTF8": "1",
+        },
+    }
     p = ROOT / ".mcp.json"
-    data = {"mcpServers": {"printlab": {"command": sys.executable, "args": ["-m", "printlab.mcp_server"],
-                                        "env": {"PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}}}}
-    p.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    return p
+    p.write_text(json.dumps({"mcpServers": {"printlab": entry}}, indent=2), encoding="utf-8")
+    written = [p]
+    agy_dir = Path.home() / ".gemini" / "config"
+    if agy_dir.exists():
+        agy_mcp = agy_dir / "mcp_config.json"
+        existing: dict = {}
+        if agy_mcp.exists() and agy_mcp.stat().st_size > 0:
+            try:
+                existing = json.loads(agy_mcp.read_text(encoding="utf-8"))
+            except Exception:
+                existing = {}
+        existing.setdefault("mcpServers", {})["printlab"] = entry
+        agy_mcp.write_text(json.dumps(existing, indent=2), encoding="utf-8")
+        written.append(agy_mcp)
+    return written
 
 
 def cmd_setup(a) -> int:
@@ -49,7 +69,8 @@ def cmd_setup(a) -> int:
 
     ok = True
     print("== 1/5 MCP-Konfiguration")
-    print("   ", write_mcp_json())
+    for mp in write_mcp_json():
+        print("   ", mp)
 
     print("== 2/5 Drucker und CFS")
     try:
@@ -180,6 +201,22 @@ def main(argv=None) -> int:
     s.add_argument("material")
     s.add_argument("values", nargs="+")
 
+    s = sub.add_parser("ui", help="printlab Studio (lokales 3D-Inspektions- & Markierungs-GUI) starten")
+    s.add_argument("--project", default=None, help="Direkt dieses Projekt öffnen")
+    s.add_argument("--port", type=int, default=8765, help="HTTP-Port (Standard: 8765)")
+    s.add_argument("--no-browser", action="store_true", help="Browser nicht automatisch öffnen")
+
+    s = sub.add_parser("feedback", help="Offenes 3D-UI-Feedback eines Projekts anzeigen oder löschen")
+    s.add_argument("project", nargs="?", default="")
+    s.add_argument("--clear", action="store_true", help="Erledigtes UI-Feedback löschen")
+
+    s = sub.add_parser("versions", help="Versionshistorie eines Projekts anzeigen")
+    s.add_argument("project")
+
+    s = sub.add_parser("restore", help="Ältere Projektversion wiederherstellen")
+    s.add_argument("project")
+    s.add_argument("version")
+
     a = ap.parse_args(argv)
     try:
         if a.cmd == "setup":
@@ -240,6 +277,24 @@ def main(argv=None) -> int:
         elif a.cmd == "applycal":
             vals = dict(v.split("=", 1) for v in a.values)
             _out(calibration.apply_calibration(a.material, {k: float(x.replace(",", ".")) for k, x in vals.items()}))
+        elif a.cmd == "ui":
+            from .ui_server import serve_ui
+            return serve_ui(port=a.port, project=a.project, open_browser=not a.no_browser)
+        elif a.cmd == "feedback":
+            from .config import project_dir
+            from .ui_server import clear_project_feedback, read_project_feedback
+            if a.clear:
+                if not a.project:
+                    raise ValueError("Zum Löschen bitte Projektnamen angeben")
+                _out(clear_project_feedback(project_dir(a.project)))
+            else:
+                _out(read_project_feedback(a.project))
+        elif a.cmd == "versions":
+            from . import history
+            _out(history.list_versions(a.project))
+        elif a.cmd == "restore":
+            from . import history
+            _out(history.restore_version(a.project, a.version))
     except Exception as exc:
         print(f"FEHLER: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1

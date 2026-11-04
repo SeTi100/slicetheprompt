@@ -20,6 +20,7 @@ from printlab.config import load_config
 _CFG = load_config()
 _MATERIAL = _CFG.get("default_material", "pla")
 WARNINGS: list[str] = []          # wird vom Build in build.json übernommen
+FEATURES: list[dict] = []         # semantisches Feature-Tagging
 
 # Durchgangslöcher (ISO 273, fein) und Sechskantmuttern (Schlüsselweite, Höhe)
 SCREW_CLEARANCE = {"M2": 2.2, "M2.5": 2.7, "M3": 3.2, "M4": 4.3, "M5": 5.3, "M6": 6.4}
@@ -113,6 +114,77 @@ def slot_cut(length: float, width: float, depth: float, material: str | None = N
     ends = Pos(-length / 2, 0, 0) * Cylinder(w / 2, depth, align=_C) + Pos(length / 2, 0, 0) * Cylinder(
         w / 2, depth, align=_C)
     return body + ends
+
+
+# ---------------------------------------------------------------- Semantische Features & Schnitte
+
+def _unwrap(p):
+    if hasattr(p, "part") and not hasattr(p, "volume"):
+        return p.part
+    return p
+
+
+def tag(name: str, shape, role: str = "feature"):
+    """Registriert einen benannten Körper in FEATURES und gibt shape unverändert zurück."""
+    s = _unwrap(shape)
+    bb = s.bounding_box()
+    vol = float(getattr(s, "volume", 0.0))
+    ctr = bb.center()
+    feat = {
+        "name": name,
+        "role": role,
+        "bbox_min": [round(float(bb.min.X), 4), round(float(bb.min.Y), 4), round(float(bb.min.Z), 4)],
+        "bbox_max": [round(float(bb.max.X), 4), round(float(bb.max.Y), 4), round(float(bb.max.Z), 4)],
+        "center": [round(float(ctr.X), 4), round(float(ctr.Y), 4), round(float(ctr.Z), 4)],
+        "volume_mm3": round(vol, 4),
+        "_shape": s,
+    }
+    FEATURES.append(feat)
+    return shape
+
+
+def cut_feature(part, name: str, cutter):
+    """Zieht cutter von part ab, misst Abtrag und registriert den Schnitt in FEATURES.
+    Erkennt verfehlte Schnitte (empty_cut) und warnt bei Teilabtrag."""
+    p = _unwrap(part)
+    c = _unwrap(cutter)
+    vol_before = float(getattr(p, "volume", 0.0))
+    res = p - c
+    vol_after = float(getattr(res, "volume", 0.0))
+    removed = max(0.0, vol_before - vol_after)
+
+    cbb = c.bounding_box()
+    c_vol = float(getattr(c, "volume", 0.0))
+    c_ctr = cbb.center()
+
+    feat = {
+        "name": name,
+        "role": "cut",
+        "bbox_min": [round(float(cbb.min.X), 4), round(float(cbb.min.Y), 4), round(float(cbb.min.Z), 4)],
+        "bbox_max": [round(float(cbb.max.X), 4), round(float(cbb.max.Y), 4), round(float(cbb.max.Z), 4)],
+        "center": [round(float(c_ctr.X), 4), round(float(c_ctr.Y), 4), round(float(c_ctr.Z), 4)],
+        "cutter_volume_mm3": round(c_vol, 4),
+        "removed_volume_mm3": round(removed, 4),
+        "_shape": c,
+    }
+
+    if removed < 0.01:
+        feat["empty_cut"] = True
+        WARNINGS.append(f"Schnitt '{name}' hat kein Material abgetragen (liegt ausserhalb des Körpers!)")
+    elif c_vol > 0 and removed < 0.15 * c_vol:
+        feat["partial_cut"] = True
+        WARNINGS.append(f"Schnitt '{name}' schneidet nur den Rand an ({round(removed, 2)} mm³ von {round(c_vol, 2)} mm³)")
+
+    FEATURES.append(feat)
+    return res
+
+
+sub_tag = cut_feature
+
+
+def clear_features() -> None:
+    """Setzt die globale Feature-Liste zurück (z. B. für Tests)."""
+    FEATURES.clear()
 
 
 # ---------------------------------------------------------------- Körper

@@ -1,0 +1,16 @@
+# Spezifikation – von Antigravity aus dem Prompt erstellt
+name: wuerfel-5mm
+beschreibung: "Miniatur-Spielwürfel 5 mm Kantenlänge mit eingesenkten Würfelaugen (1 bis 6)"
+material: pla        # pla
+qualitaet: fein      # fein (0.12) für maximale Details bei 5 mm
+menge: 1
+filament: null       # automatisch
+bbox: [5.0, 5.0, 5.0]
+bbox_tol: 0.1
+masse:
+  - "Kantenlänge 5.0 mm (Soll nach Nutzerangabe)"
+  - "Würfelaugen: eingesenkte Halbkugel-/Zylindermulden D = 0.7 mm, Tiefe = 0.35 mm"
+annahmen:
+  - "Klassische gegenüberliegende Augensumme 7: 1 gegenüber 6, 2 gegenüber 5, 3 gegenüber 4"
+  - "Unterseite z=0 ist Seite 1 (einzelner zentraler Punkt als zylindrische Vertiefung mit Fase)"
+  - "Feine 0.12 mm Schichthöhe für präzise Darstellung der kleinen Mulden"
