@@ -1,6 +1,9 @@
 """Tests für CFS-Auswertung, Spulenwahl, Mehrkörper-Prüfung und 3MF-Export (ohne Drucker/Slicer)."""
 
+import json
 import sys
+import tempfile
+import zipfile
 from pathlib import Path
 
 import numpy as np
@@ -71,22 +74,29 @@ def test_bodies_analysis():
     assert rep["metrics"]["print"]["overhang_mm2_without_ok_bridges"] < 1.0, rep["metrics"]["print"]
 
 
-def test_3mf_roundtrip(tmp=Path("/tmp")):
+def test_3mf_roundtrip():
     b = _inlay_bodies()
-    p = threemf.write_multipart_3mf(tmp / "t.3mf", [("platte", b["platte"], 2), ("schrift", b["schrift"], 4)])
-    parts = threemf.read_parts(p)
-    assert [(x["name"], x["extruder"]) for x in parts] == [("platte", 2), ("schrift", 4)]
-    assert all(x["triangles"] > 0 for x in parts)
+    with tempfile.TemporaryDirectory() as td:
+        p = threemf.write_multipart_3mf(Path(td) / "t.3mf", [("platte", b["platte"], 2), ("schrift", b["schrift"], 4)])
+        threemf.embed_project_settings(p, {"from": "project", "filament_colour": ["#FFFFFF", "#000000"]}, "7.3.1")
+        parts = threemf.read_parts(p)
+        assert [(x["name"], x["extruder"]) for x in parts] == [("platte", 2), ("schrift", 4)]
+        assert all(x["triangles"] > 0 for x in parts)
+        with zipfile.ZipFile(p) as z:
+            assert "Metadata/creality.config" in z.namelist()
+            assert json.loads(z.read("Metadata/project_settings.config"))["from"] == "project"
+            assert b"Creality_Print V7.3.1" in z.read("3D/3dmodel.model")
 
 
-def test_gcode_tools(tmp=Path("/tmp")):
-    g = tmp / "t.gcode"
-    g.write_text("M104 S220\nM140 S60\nT1\nG1 X1\nT3\nG1 X2\nT1\n; filament used [g] = 1.0, 2.0, 3.0, 4.0\n"
-                 "; printer_settings_id = Creality Hi 0.4 nozzle\n; filament_type = PLA;PLA;PLA;PLA\n")
-    info = gcode_info(g)
-    assert info["tools_used"] == [1, 3] and info["tool_changes"] == 2
-    assert gcode_safety(info, CFG, expected_tools={1: "PLA", 3: "PLA"}) == []
-    assert gcode_safety(info, CFG, expected_tools={0: "PLA"})   # falsche Zuordnung wird erkannt
+def test_gcode_tools():
+    with tempfile.TemporaryDirectory() as td:
+        g = Path(td) / "t.gcode"
+        g.write_text("M104 S220\nM140 S60\nT1\nG1 X1\nT3\nG1 X2\nT1\n; filament used [g] = 1.0, 2.0, 3.0, 4.0\n"
+                     "; printer_settings_id = Creality Hi 0.4 nozzle\n; filament_type = PLA;PLA;PLA;PLA\n")
+        info = gcode_info(g)
+        assert info["tools_used"] == [1, 3] and info["tool_changes"] == 2
+        assert gcode_safety(info, CFG, expected_tools={1: "PLA", 3: "PLA"}) == []
+        assert gcode_safety(info, CFG, expected_tools={0: "PLA"})   # falsche Zuordnung wird erkannt
 
 
 if __name__ == "__main__":

@@ -298,7 +298,7 @@ def write_filament_catalog(sel: dict, idx: dict) -> dict:
 def probe_cli(exe: str, kind: str) -> dict:
     """Welche Kommandozeilen-Optionen kennt dieses Programm? (Hilfe-Text auswerten)"""
     pre = ["--cli"] if kind == "crealityprint" else []
-    kw = {"creationflags": 0x08000000} if IS_WIN else {}
+    kw = {"creationflags": 0x00000008} if IS_WIN else {}   # DETACHED_PROCESS: schreibt sonst direkt auf CONOUT$
     try:
         p = subprocess.run([exe, *pre, "--help"], capture_output=True, text=True, encoding="utf-8",
                            errors="replace", timeout=60, **kw)
@@ -373,6 +373,94 @@ def filament_file(name: str, color: str | None = None, workdir: Path | None = No
     return str(dst)
 
 
+# ---------------------------------------------------------------- 3MF-Projekteinstellungen
+
+FLUSH_VOLUME_MM3 = 300   # Spülmenge je Farbwechsel (Creality Print berechnet sie in der GUI aus den Farben)
+_PROJECT_DROP = {"type", "inherits", "instantiation", "setting_id", "filament_id", "compatible_printers",
+                 "compatible_printers_condition", "print_host", "print_host_webui", "name"}
+_template_cache: dict[str, dict] = {}
+
+
+def _project_template(exe: str) -> dict:
+    """project_settings.config einer mitgelieferten Creality-3MF – dient nur als Typvorlage (Liste oder
+    Einzelwert je Schlüssel) und liefert Standardwerte für Schlüssel, die in den Profilen fehlen."""
+    if exe in _template_cache:
+        return _template_cache[exe]
+    import zipfile
+    tpl: dict = {}
+    for root in profile_roots(exe)[:2]:
+        res = root.parent
+        cands = sorted(res.rglob("*.3mf"), key=lambda p: ("tolerance" not in p.name.lower(), p.name))
+        for c in cands:
+            try:
+                with zipfile.ZipFile(c) as z:
+                    if "Metadata/project_settings.config" in z.namelist():
+                        tpl = json.loads(z.read("Metadata/project_settings.config"))
+                        break
+            except Exception:
+                continue
+        if tpl:
+            break
+    _template_cache[exe] = tpl
+    return tpl
+
+
+def build_project_settings(machine_file: str, process_file: str, filament_files: list[str], exe: str) -> dict:
+    """Drucker + Prozess + N Filamente zu einer project_settings.config für eine 3MF zusammenführen."""
+    machine = json.loads(Path(machine_file).read_text(encoding="utf-8"))
+    process = json.loads(Path(process_file).read_text(encoding="utf-8"))
+    fils = [json.loads(Path(f).read_text(encoding="utf-8")) for f in filament_files]
+    n = len(fils)
+    tpl = _project_template(exe)
+    tpl_n = len(tpl.get("filament_colour") or []) or 1
+
+    fil_keys = set().union(*(f.keys() for f in fils)) - _PROJECT_DROP
+    fil_keys |= {k for k, v in tpl.items() if isinstance(v, list) and len(v) == tpl_n and tpl_n > 1
+                 and k not in machine and k not in process and not k.startswith("machine_")
+                 and k != "start_end_points"}
+    fil_keys |= {"filament_colour", "filament_ids", "filament_settings_id"}
+
+    cfg: dict = {}
+    for k, v in tpl.items():                       # Standardwerte für fehlende Schlüssel
+        if k not in fil_keys:
+            cfg[k] = v
+    cfg.update({k: v for k, v in machine.items() if k not in _PROJECT_DROP})
+    cfg.update({k: v for k, v in process.items() if k not in _PROJECT_DROP})
+
+    def first(v):
+        return v[0] if isinstance(v, list) and v else ("" if isinstance(v, list) else v)
+
+    for k in fil_keys:
+        vals = []
+        for f in fils:
+            if k in f:
+                vals.append(first(f[k]))
+            elif k in tpl:
+                vals.append(first(tpl[k]))
+            else:
+                vals.append("")
+        cfg[k] = vals
+    cfg["filament_settings_id"] = [first(f.get("filament_settings_id")) or f.get("name", "") for f in fils]
+    cfg["filament_colour"] = [first(f.get("filament_colour")) or "#FFFFFF" for f in fils]
+    cfg["filament_ids"] = [str(f.get("filament_id") or "") for f in fils]
+    cfg["flush_volumes_matrix"] = [str(0 if i == j else FLUSH_VOLUME_MM3) for i in range(n) for j in range(n)]
+    cfg["flush_volumes_vector"] = [str(first(tpl.get("flush_volumes_vector")) or 140)] * (2 * n)
+
+    # Typen an die Vorlage angleichen: alles Zeichenketten, Listen nur wo die Vorlage Listen hat
+    out = {}
+    for k, v in cfg.items():
+        if tpl and k in tpl and not isinstance(tpl[k], list) and isinstance(v, list):
+            v = first(v)
+        elif tpl and k in tpl and isinstance(tpl[k], list) and not isinstance(v, list):
+            v = [v]
+        out[k] = [str(x) for x in v] if isinstance(v, list) else str(v)
+    out["printer_settings_id"] = str(first(machine.get("printer_settings_id")) or machine.get("name", ""))
+    out["print_settings_id"] = str(first(process.get("print_settings_id")) or process.get("name", ""))
+    out["from"] = "project"
+    out.setdefault("version", str(tpl.get("version") or "6.0.0"))
+    return out
+
+
 # ---------------------------------------------------------------- Slicen
 
 def _run(cmd: list[str], timeout: int):
@@ -405,15 +493,25 @@ def slice_model(model: str | Path, filament_files: list[str], quality: str = "st
     cli = s.get("cli") or {}
     prefix = cli.get("prefix", ["--cli"] if kind == "crealityprint" else [])
 
-    args: list[tuple[str, str | None]] = [
-        ("slice", "0"),
-        ("load-settings", f"{files['machine']};{files['process'][quality]}"),
-        ("load-filaments", ";".join(filament_files)),
-    ]
-    if filament_ids and model.suffix.lower() != ".3mf":
-        args.append(("load-filament-ids", ",".join(str(i) for i in filament_ids)))
-    if model.suffix.lower() == ".3mf":
-        args.append(("allow-newer-file", None))   # 3MF im Bambu-Format trägt Version 1.x
+    is_3mf = model.suffix.lower() == ".3mf"
+    if is_3mf and kind == "crealityprint":
+        # Creality Print 7: Einstellungen müssen in die 3MF eingebettet sein (--load-* ist dort verboten)
+        from .threemf import embed_project_settings
+        mv = re.search(r"Creality-(\d+\.\d+\.\d+)", (cli.get("help_head") or ""))
+        embed_project_settings(model, build_project_settings(files["machine"], files["process"][quality],
+                                                             filament_files, s["exe"]),
+                               app_version=mv.group(1) if mv else "7.3.1")
+        args: list[tuple[str, str | None]] = [("slice", "0"), ("allow-newer-file", None)]
+    else:
+        args = [
+            ("slice", "0"),
+            ("load-settings", f"{files['machine']};{files['process'][quality]}"),
+            ("load-filaments", ";".join(filament_files)),
+        ]
+        if filament_ids and not is_3mf:
+            args.append(("load-filament-ids", ",".join(str(i) for i in filament_ids)))
+        if is_3mf:
+            args.append(("allow-newer-file", None))
     if kind == "crealityprint":
         args.append(("need-gcode-file", None))
     else:

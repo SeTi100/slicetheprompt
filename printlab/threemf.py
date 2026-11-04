@@ -11,6 +11,7 @@ Aufbau (wie Bambu Studio / OrcaSlicer / Creality Print es schreiben):
 
 from __future__ import annotations
 
+import re
 import uuid
 import zipfile
 from pathlib import Path
@@ -99,6 +100,37 @@ def write_multipart_3mf(path: str | Path, bodies: list[tuple[str, np.ndarray, in
         z.writestr("3D/_rels/3dmodel.model.rels", model_rels)
         z.writestr("3D/Objects/object_1.model", objects_model)
         z.writestr("Metadata/model_settings.config", model_settings)
+    return path
+
+
+def embed_project_settings(path: str | Path, settings: dict, app_version: str = "7.3.1") -> Path:
+    """Metadata/project_settings.config (aufgelöste Drucker-/Prozess-/Filamenteinstellungen) und
+    Metadata/creality.config in die 3MF schreiben.
+
+    Creality Print 7.3 beim CLI-Slicen:
+    - stürzt bei einer 3MF ohne project_settings.config ab (0xC0000005) und lehnt
+      --load-settings/--load-filaments bei 3MF-Projekten ab – die Einstellungen müssen also hinein;
+    - ignoriert die Extruder-Zuordnung der Teile, wenn die Datei nicht als Creality-Datei erkannt wird
+      (Log: "role filament migration: is_creality=false") – darum creality.config und Application."""
+    import json
+    path = Path(path)
+    skip = {"Metadata/project_settings.config", "Metadata/creality.config"}
+    with zipfile.ZipFile(path) as z:
+        files = {n: z.read(n) for n in z.namelist() if n not in skip}
+    files["Metadata/project_settings.config"] = json.dumps(settings, indent=4, ensure_ascii=False).encode("utf-8")
+    files["Metadata/creality.config"] = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n<config>'
+        '<metadata key="Company" value="Creality"/><metadata key="Application" value="Creality_Print"/>'
+        f'<metadata key="AppVersion" value="{app_version}"/><metadata key="AppStage" value="Release"/>'
+        '<metadata key="FileVersion" value="1.0"/><metadata key="FileType" value="Undefined"/></config>'
+    ).encode("utf-8")
+    main = files["3D/3dmodel.model"].decode("utf-8")
+    main = re.sub(r'(<metadata name="Application">)[^<]*(</metadata>)', rf"\g<1>Creality_Print V{app_version}\g<2>",
+                  main, count=1)
+    files["3D/3dmodel.model"] = main.encode("utf-8")
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+        for n, data in files.items():
+            z.writestr(n, data)
     return path
 
 
