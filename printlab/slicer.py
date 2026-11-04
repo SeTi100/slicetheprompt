@@ -212,6 +212,7 @@ def select_profiles(idx: dict) -> dict:
         raise RuntimeError(f"Kein passendes Filamentprofil für: {', '.join(missing)}")
     return {
         "machine": machine,
+        "machine_system": system_machine,
         "process": processes,
         "filament": filaments,
         "alternatives": {
@@ -225,19 +226,24 @@ def select_profiles(idx: dict) -> dict:
 
 
 
-def _dump_profile(data: dict, name: str, kind: str, path: Path) -> str:
+def _dump_profile(data: dict, name: str, kind: str, path: Path, machine_system: str) -> str:
+    """Aufgelöstes Profil schreiben. Creality Print 7 prüft beim CLI-Slicen, dass die
+    compatible_printers des Prozessprofils den Systemnamen des Druckers enthalten; der Systemname
+    ist bei from=system der Profilname, sonst 'inherits'. Darum: alles als System-Profile ausgeben."""
     data = dict(data)
-    data["from"] = "User"
-    data["name"] = name
-    if kind != "machine":
-        data["compatible_printers"] = []
-        data["compatible_printers_condition"] = ""
+    data["from"] = "system"
+    data["inherits"] = ""
     if kind == "machine":
-        data["printer_settings_id"] = name
-    elif kind == "process":
-        data["print_settings_id"] = name
+        data["name"] = machine_system
+        data["printer_settings_id"] = machine_system
     else:
-        data["filament_settings_id"] = [name]
+        data["name"] = name
+        data["compatible_printers"] = [machine_system]
+        data["compatible_printers_condition"] = ""
+        if kind == "process":
+            data["print_settings_id"] = name
+        else:
+            data["filament_settings_id"] = [name]
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
     return str(path)
@@ -246,11 +252,12 @@ def _dump_profile(data: dict, name: str, kind: str, path: Path) -> str:
 def write_flat_profiles(sel: dict, idx: dict) -> dict:
     """Aufgelöste Profile nach config/slicer/*.json schreiben."""
     PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+    ms = sel.get("machine_system") or sel["machine"]
     files = {"machine": _dump_profile(flatten(sel["machine"], idx), sel["machine"], "machine",
-                                      PROFILE_DIR / "machine.json")}
-    files["process"] = {q: _dump_profile(flatten(n, idx), n, "process", PROFILE_DIR / f"process_{q}.json")
+                                      PROFILE_DIR / "machine.json", ms)}
+    files["process"] = {q: _dump_profile(flatten(n, idx), n, "process", PROFILE_DIR / f"process_{q}.json", ms)
                         for q, n in sel["process"].items()}
-    files["filament"] = {m: _dump_profile(flatten(n, idx), n, "filament", PROFILE_DIR / f"filament_{m}.json")
+    files["filament"] = {m: _dump_profile(flatten(n, idx), n, "filament", PROFILE_DIR / f"filament_{m}.json", ms)
                          for m, n in sel["filament"].items()}
     return files
 
@@ -262,6 +269,7 @@ def _safe_name(n: str) -> str:
 def write_filament_catalog(sel: dict, idx: dict) -> dict:
     """Alle Filamentprofile, die zum Hi passen, auflösen → config/slicer/filaments/*.json + Katalog."""
     machine = sel["machine"]
+    machine_sys = sel.get("machine_system") or machine
     cat = {}
     fdir = PROFILE_DIR / "filaments"
     for n, e in idx.items():
@@ -273,10 +281,14 @@ def write_filament_catalog(sel: dict, idx: dict) -> dict:
             continue
         cp = set(_as_list(f.get("compatible_printers")))
         hi_named = re.search(r"(^|[^A-Za-z])Hi([^A-Za-z]|$)", n) is not None
-        if not (machine in cp or hi_named):
+        nozzle = re.search(r"(\d\.\d+)\s*nozzle", n)
+        if nozzle and nozzle.group(1) != "0.4":
+            continue                      # Profil für andere Düse
+        if not (machine in cp or machine_sys in cp or (hi_named and not cp)
+                or (hi_named and nozzle and nozzle.group(1) == "0.4")):
             continue
         ftype = str(_as_list(f.get("filament_type"))[0] if f.get("filament_type") else "").upper()
-        path = _dump_profile(f, n, "filament", fdir / f"{_safe_name(n)}.json")
+        path = _dump_profile(f, n, "filament", fdir / f"{_safe_name(n)}.json", machine_sys)
         cat[n] = {"file": path, "type": ftype, "filament_id": str(f.get("filament_id") or ""),
                   "vendor": str(_as_list(f.get("filament_vendor"))[0] if f.get("filament_vendor") else ""),
                   "nozzle_temp": _first_float(f.get("nozzle_temperature")), "user": e["user"]}
@@ -310,7 +322,8 @@ def setup_slicer(exe: str | None = None, kind: str | None = None) -> dict:
     files = write_flat_profiles(sel, idx)
     catalog = write_filament_catalog(sel, idx)
     cli = probe_cli(exe, kind)
-    data = {"kind": kind, "exe": exe, "cli": cli, "machine": sel["machine"], "process": sel["process"],
+    data = {"kind": kind, "exe": exe, "cli": cli, "machine": sel["machine"],
+            "machine_system": sel["machine_system"], "process": sel["process"],
             "filament": sel["filament"], "files": files, "alternatives": sel["alternatives"],
             "profile_roots": [str(r) for r in roots], "catalog": catalog}
     write_yaml(SLICER_YAML, data, header=(
@@ -323,7 +336,8 @@ def reflatten_from_yaml() -> dict:
     """Auswahl aus slicer.yaml übernehmen und Profile neu auflösen (nach Handänderung)."""
     s = load_config()["slicer"]
     idx = index_profiles([Path(r) for r in s["profile_roots"]])
-    sel = {"machine": s["machine"], "process": s["process"], "filament": s["filament"]}
+    sel = {"machine": s["machine"], "process": s["process"], "filament": s["filament"],
+           "machine_system": s.get("machine_system") or s["machine"]}
     s["files"] = write_flat_profiles(sel, idx)
     s["catalog"] = write_filament_catalog(sel, idx)
     s["cli"] = probe_cli(s["exe"], s.get("kind", "crealityprint"))
@@ -398,6 +412,8 @@ def slice_model(model: str | Path, filament_files: list[str], quality: str = "st
     ]
     if filament_ids and model.suffix.lower() != ".3mf":
         args.append(("load-filament-ids", ",".join(str(i) for i in filament_ids)))
+    if model.suffix.lower() == ".3mf":
+        args.append(("allow-newer-file", None))   # 3MF im Bambu-Format trägt Version 1.x
     if kind == "crealityprint":
         args.append(("need-gcode-file", None))
     else:

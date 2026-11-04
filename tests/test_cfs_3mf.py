@@ -43,7 +43,8 @@ def test_parse_and_choose():
         raise AssertionError("PETG darf nicht gefunden werden")
     except LookupError:
         pass
-    cat = {"Hyper PLA @Creality Hi 0.4 nozzle": {"filament_id": "01001"}}
+    cat = {"Hyper PLA @Creality Hi 0.2 nozzle": {"filament_id": "01001"},
+           "Hyper PLA @Creality Hi 0.4 nozzle": {"filament_id": "01001"}}
     assert cfs.match_profile(st["slots"][0], cat, {}) == "Hyper PLA @Creality Hi 0.4 nozzle"
 
 

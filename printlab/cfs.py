@@ -117,10 +117,15 @@ def match_profile(slot: dict, catalog: dict, default_by_type: dict) -> str | Non
     code = slot.get("code") or ""
     cands = [n for n, e in catalog.items() if e.get("filament_id") and code.endswith(str(e["filament_id"]))]
     if cands:
-        cands.sort(key=lambda n: (0 if "Hi" in n else 1, len(n)))
+        cands.sort(key=lambda n: (0 if re.search(r"Hi 0\.4", n) else 1 if "Hi" in n else 2,
+                                  0 if not e_user(catalog, n) else 1, len(n)))
         return cands[0]
     typ = (slot.get("type") or "").lower()
     return default_by_type.get(typ)
+
+
+def e_user(catalog: dict, name: str) -> bool:
+    return bool(catalog.get(name, {}).get("user"))
 
 
 def choose_slot(want: str | None, material: str | None, cfs: dict) -> dict:
