@@ -45,7 +45,8 @@ def run_doctor(fix: bool = True) -> dict:
     except Exception as exc:
         out["ok"] = False
         out["slicer"] = {"ok": False, "error": str(exc),
-                         "hint": "Creality Print installieren bzw. Pfad mit 'uv run printlab setup --exe …' angeben"}
+                         "hint": "Creality Print installieren ('winget install -e --id Creality.CrealityPrint' "
+                                 "oder setup.ps1) bzw. Pfad mit 'uv run printlab setup --exe …' angeben"}
 
     # CAD
     try:

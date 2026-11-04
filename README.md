@@ -22,7 +22,8 @@ powershell -ExecutionPolicy Bypass -File .\setup.ps1
 claude
 ```
 
-Das Setup installiert `uv`, Python 3.12 und alle Pakete, findet Creality Print, löst die Profile
+Das Setup installiert `uv` (eigenständig, nicht nur aus conda, damit die Claude-App es findet),
+Python 3.12 und alle Pakete, installiert Creality Print per winget, falls es fehlt, löst die Profile
 für „Creality Hi 0.4“ auf (PLA/PETG, 0,12/0,20/0,28 mm), testet Drucker und CFS, slicet zur Probe
 ein- und zweifarbig und baut die Beispiele. Danach `claude` im Ordner starten, den Ordner als
 vertrauenswürdig bestätigen und den MCP-Server „printlab“ zulassen (`/mcp` zeigt den Status).
@@ -31,6 +32,8 @@ vertrauenswürdig bestätigen und den MCP-Server „printlab“ zulassen (`/mcp`
   Slicer richtet sich beim ersten Slicen selbst ein. Der erste Start dauert dann einige Minuten.
 - **Claude-Desktop-App** statt Claude Code: App ganz beenden, `uv run printlab install claude-desktop`,
   App starten. Der Befehl trägt printlab mit absolutem Pfad ein und legt eine Sicherung an.
+- printlab in Claude Code „failed to connect“? Meist liegt `uv` nur in einer conda-Umgebung:
+  `.\setup.ps1` erneut ausführen (installiert ein eigenes `uv`), dann die App neu starten.
 - Creality Print wird nicht gefunden? `.\setup.ps1 -Exe "C:\…\CrealityPrint.exe"`
 - Test-Slice liefert keinen G-Code? **Creality Print schliessen** und erneut ausführen.
 - Zustand prüfen: `uv run printlab doctor` (oder im Chat: „doctor“).

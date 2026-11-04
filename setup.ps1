@@ -17,12 +17,29 @@ $env:PYTHONIOENCODING = "utf-8"
 function Step($t) { Write-Host ""; Write-Host "### $t" -ForegroundColor Cyan }
 
 Step "1/5 uv (Python-Paketverwaltung)"
-if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
-    Write-Host "uv wird installiert ..."
+# Die Claude-App startet printlab ueber "uv" aus dem dauerhaften PATH. Ein uv, das nur in einer
+# aktivierten conda-/venv-Umgebung liegt, findet sie nicht -> eigenes uv installieren.
+$persistPath = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [Environment]::GetEnvironmentVariable("Path", "User")
+$uvPersistent = $persistPath -split ";" | Where-Object { $_ -and (Test-Path (Join-Path $_ "uv.exe")) } | Select-Object -First 1
+if (-not $uvPersistent) {
+    Write-Host "uv wird installiert (nach $env:USERPROFILE\.local\bin, dauerhaft im PATH) ..."
     powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
     $env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
 }
 uv --version
+
+if ($Exe -eq "") {
+    $cp = @("$env:ProgramFiles\Creality\*\CrealityPrint.exe", "$env:ProgramFiles\Creality\*\*\CrealityPrint.exe",
+            "$env:LOCALAPPDATA\Programs\Creality\*\CrealityPrint.exe") | ForEach-Object { Resolve-Path $_ -ErrorAction SilentlyContinue }
+    if (-not $cp) {
+        if (Get-Command winget -ErrorAction SilentlyContinue) {
+            Write-Host "Creality Print wird installiert (winget, Creality.CrealityPrint) ..."
+            winget install -e --id Creality.CrealityPrint --accept-package-agreements --accept-source-agreements
+        } else {
+            Write-Host "Creality Print fehlt und winget ist nicht vorhanden: von creality.com installieren." -ForegroundColor Yellow
+        }
+    }
+}
 
 Step "2/5 Python 3.12 und Pakete (build123d, numpy, matplotlib, mcp ...) - dauert beim ersten Mal einige Minuten"
 uv sync --python 3.12
