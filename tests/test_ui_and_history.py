@@ -1,4 +1,4 @@
-"""Comprehensive automated test suite for printlab Studio (WP-1 bis WP-5).
+"""Comprehensive automated test suite for SliceThePrompt (WP-1 bis WP-5).
 
 Covers all 5 mandatory test functions specified in AGENT.md §5.2:
 1. test_snapshots_and_restore:
@@ -51,9 +51,9 @@ if str(_TESTS_DIR) not in sys.path:
     sys.path.insert(0, str(_TESTS_DIR))
 
 from meshgen import box, voxels_to_tris  # noqa: E402
-from printlab import meshcheck as mc  # noqa: E402
-from printlab.config import load_config  # noqa: E402
-from printlab.stlio import read_stl, write_stl  # noqa: E402
+from slicetheprompt import meshcheck as mc  # noqa: E402
+from slicetheprompt.config import load_config  # noqa: E402
+from slicetheprompt.stlio import read_stl, write_stl  # noqa: E402
 
 # 1x1 transparent PNG in Base64 (valid binary PNG with magic bytes \x89PNG\r\n\x1a\n)
 TINY_PNG_B64 = (
@@ -107,9 +107,9 @@ checks = {{"Laenge": (L, {l}, 0.05)}}
 
 def test_snapshots_and_restore():
     """WP-1: Snapshot creation, meta.json schema, SHA-256 deduplication, version rollback."""
-    from printlab import history, pipeline
+    from slicetheprompt import history, pipeline
 
-    with tempfile.TemporaryDirectory(prefix="printlab_test_snap_") as tmp_dir_str:
+    with tempfile.TemporaryDirectory(prefix="slicetheprompt_test_snap_") as tmp_dir_str:
         tmp_dir = Path(tmp_dir_str).resolve()
         _create_minimal_project(tmp_dir, name="snap_test", l=40.0, b=30.0, h=10.0)
 
@@ -210,7 +210,7 @@ def test_snapshots_and_restore():
 
 def test_ast_params():
     """WP-1: AST parameter extraction and update for scalars, negatives, tuples, and inline comments."""
-    from printlab import params
+    from slicetheprompt import params
 
     sample_code = """\
 # Header Docstring
@@ -237,7 +237,7 @@ checks = {"Laenge": (L, 60.0, 0.05)}
 other_var = 123.45
 """
 
-    with tempfile.TemporaryDirectory(prefix="printlab_test_params_") as tmp_dir:
+    with tempfile.TemporaryDirectory(prefix="slicetheprompt_test_params_") as tmp_dir:
         model_file = Path(tmp_dir) / "model.py"
         model_file.write_text(sample_code, encoding="utf-8")
 
@@ -322,7 +322,7 @@ other_var = 123.45
 def test_empty_cut_detection():
     """WP-2: Empty cut outside workpiece triggers warning, exports ghost_<slug>.stl, injects check ok=False."""
     from lib import parts
-    from printlab import pipeline
+    from slicetheprompt import pipeline
 
     # 1. Direct lib.parts unit tests for tag and cut_feature
     assert hasattr(parts, "tag"), "lib.parts must define tag(name, shape, role)"
@@ -354,7 +354,7 @@ def test_empty_cut_detection():
     assert any("bohrung_daneben" in w for w in parts.WARNINGS), "Warning must be recorded for empty cut"
 
     # 2. Subprocess pipeline test with empty cut
-    with tempfile.TemporaryDirectory(prefix="printlab_test_cut_") as tmp_dir_str:
+    with tempfile.TemporaryDirectory(prefix="slicetheprompt_test_cut_") as tmp_dir_str:
         tmp_dir = Path(tmp_dir_str).resolve()
         tmp_dir.mkdir(parents=True, exist_ok=True)
         (tmp_dir / "out").mkdir(parents=True, exist_ok=True)
@@ -478,7 +478,7 @@ def test_diagnostics_3d_and_coord_transform():
 
     # 2. 3D Diagnostics Verification (diagnostics_3d)
     if not hasattr(mc, "diagnostics_3d"):
-        raise AttributeError("printlab.meshcheck has no attribute 'diagnostics_3d'")
+        raise AttributeError("slicetheprompt.meshcheck has no attribute 'diagnostics_3d'")
 
     cfg = load_config()
 
@@ -535,9 +535,9 @@ def test_diagnostics_3d_and_coord_transform():
 
 def test_ui_http_endpoints_and_feedback():
     """WP-3 & WP-5: Ephemeral HTTP server, REST endpoints, base64 PNG decoding, path-traversal prevention."""
-    from printlab import mcp_server, ui_server
+    from slicetheprompt import mcp_server, ui_server
 
-    with tempfile.TemporaryDirectory(prefix="printlab_test_server_") as tmp_root:
+    with tempfile.TemporaryDirectory(prefix="slicetheprompt_test_server_") as tmp_root:
         proj_dir = Path(tmp_root) / "test_api_proj"
         _create_minimal_project(proj_dir, name="test_api_proj", l=50.0, b=30.0, h=10.0)
 
@@ -692,7 +692,7 @@ def run_all_tests() -> int:
     ]
 
     print("=" * 72)
-    print("Running printlab Studio Comprehensive Test Suite (WP-1 bis WP-5)")
+    print("Running SliceThePrompt Comprehensive Test Suite (WP-1 bis WP-5)")
     print("=" * 72)
 
     passed = 0

@@ -140,7 +140,7 @@ def build(project: str, timeout: int = 180) -> dict:
                     pass
     try:
         proc = subprocess.run(
-            [sys.executable, "-m", "printlab._cad_runner", str(d / "model.py"), str(out)],
+            [sys.executable, "-m", "slicetheprompt._cad_runner", str(d / "model.py"), str(out)],
             capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout,
             cwd=str(Path(__file__).resolve().parents[1]),
         )
@@ -185,12 +185,12 @@ def prepare(project: str, orientation: str = "wie modelliert") -> dict:
     rot = mc.rotate(tris, R)
     placed = mc.place_on_bed(rot, (bed["x"], bed["y"]))
     shift = (placed - rot).reshape(-1, 3)[0]
-    write_stl(d / "out" / "print.stl", placed, header=f"printlab {d.name}")
+    write_stl(d / "out" / "print.stl", placed, header=f"slicetheprompt {d.name}")
     files = {}
     for n in names:
         t = mc.rotate(bodies[n], R) + shift
         f = d / "out" / f"print_{body_slug(n)}.stl"
-        write_stl(f, t, header=f"printlab {d.name} {n}")
+        write_stl(f, t, header=f"slicetheprompt {d.name} {n}")
         files[n] = str(f)
 
     # Ghost-STLs verfehlter Schnitte in Drucklage transformieren
@@ -206,7 +206,7 @@ def prepare(project: str, orientation: str = "wie modelliert") -> dict:
         g_tris = read_stl(g_path)
         g_placed = mc.rotate(g_tris, R) + shift
         out_ghost = d / "out" / f"{g_path.stem}_print.stl"
-        write_stl(out_ghost, g_placed, header=f"printlab {d.name} {g_path.stem}")
+        write_stl(out_ghost, g_placed, header=f"slicetheprompt {d.name} {g_path.stem}")
         ghost_files[g_path.stem] = str(out_ghost)
 
     info = {

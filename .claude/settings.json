@@ -1,34 +1,34 @@
 {
   "enabledMcpjsonServers": [
-    "printlab"
+    "slicetheprompt"
   ],
   "permissions": {
     "allow": [
-      "mcp__printlab__project_new",
-      "mcp__printlab__project_list",
-      "mcp__printlab__build_and_check",
-      "mcp__printlab__check_report",
-      "mcp__printlab__render_views",
-      "mcp__printlab__cfs_status",
-      "mcp__printlab__list_filaments",
-      "mcp__printlab__filament_plan",
-      "mcp__printlab__slice",
-      "mcp__printlab__printer_status",
-      "mcp__printlab__doctor",
-      "mcp__printlab__get_ui_feedback",
-      "mcp__printlab__version_list",
-      "mcp__printlab__get_config",
-      "mcp__printlab__calibration_part",
+      "mcp__slicetheprompt__project_new",
+      "mcp__slicetheprompt__project_list",
+      "mcp__slicetheprompt__build_and_check",
+      "mcp__slicetheprompt__check_report",
+      "mcp__slicetheprompt__render_views",
+      "mcp__slicetheprompt__cfs_status",
+      "mcp__slicetheprompt__list_filaments",
+      "mcp__slicetheprompt__filament_plan",
+      "mcp__slicetheprompt__slice",
+      "mcp__slicetheprompt__printer_status",
+      "mcp__slicetheprompt__doctor",
+      "mcp__slicetheprompt__get_ui_feedback",
+      "mcp__slicetheprompt__version_list",
+      "mcp__slicetheprompt__get_config",
+      "mcp__slicetheprompt__calibration_part",
       "Read(projects/**)",
       "Edit(projects/**)",
       "Write(projects/**)",
-      "Bash(uv run printlab:*)",
+      "Bash(uv run slicetheprompt:*)",
       "Bash(uv run python:*)"
     ],
     "ask": [
-      "mcp__printlab__upload_and_print",
-      "mcp__printlab__print_control",
-      "mcp__printlab__apply_calibration"
+      "mcp__slicetheprompt__upload_and_print",
+      "mcp__slicetheprompt__print_control",
+      "mcp__slicetheprompt__apply_calibration"
     ]
   }
 }

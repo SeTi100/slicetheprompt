@@ -1170,7 +1170,7 @@ function captureAnnotatedScreenshotDataUrl() {
   ctx.font = `bold ${Math.round(12 * dpr)}px Consolas, monospace`;
   ctx.fillStyle = "#38bdf8";
   ctx.fillText(
-    `printlab Studio · ${S.currentProject} (${S.activeVersion || "live"}, Ansicht: ${S.viewMode})`,
+    `SliceThePrompt · ${S.currentProject} (${S.activeVersion || "live"}, Ansicht: ${S.viewMode})`,
     20 * dpr,
     30 * dpr
   );

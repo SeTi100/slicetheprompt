@@ -1,4 +1,4 @@
-"""AST parameter extraction and in-place updating for printlab CAD models."""
+"""AST parameter extraction and in-place updating for slicetheprompt CAD models."""
 
 from __future__ import annotations
 

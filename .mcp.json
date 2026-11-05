@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "printlab": {
+    "slicetheprompt": {
       "command": "uv",
       "args": [
         "run",
@@ -8,7 +8,7 @@
         "${CLAUDE_PROJECT_DIR:-.}",
         "--frozen",
         "--quiet",
-        "printlab-mcp"
+        "slicetheprompt-mcp"
       ],
       "env": {
         "PYTHONIOENCODING": "utf-8",

@@ -3,11 +3,11 @@ setlocal
 cd /d "%~dp0"
 
 echo ==========================================================
-echo   printlab Studio - 3D-Pruefstand (Creality Hi Combo)
+echo   SliceThePrompt - 3D-Pruefstand (Creality Hi Combo)
 echo ==========================================================
 
 REM Starte ueber uv
-uv run printlab ui %*
+uv run slicetheprompt ui %*
 
 if %ERRORLEVEL% NEQ 0 (
     echo.

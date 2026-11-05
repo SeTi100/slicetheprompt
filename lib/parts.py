@@ -15,7 +15,7 @@ import math
 
 from build123d import (Align, Axis, Box, Cone, Cylinder, Pos, RegularPolygon, chamfer, extrude)
 
-from printlab.config import load_config
+from slicetheprompt.config import load_config
 
 _CFG = load_config()
 _MATERIAL = _CFG.get("default_material", "pla")

@@ -327,8 +327,8 @@ def setup_slicer(exe: str | None = None, kind: str | None = None) -> dict:
             "filament": sel["filament"], "files": files, "alternatives": sel["alternatives"],
             "profile_roots": [str(r) for r in roots], "catalog": catalog}
     write_yaml(SLICER_YAML, data, header=(
-        "Von 'printlab setup' erzeugt. Profile ändern: Namen unten anpassen und\n"
-        "'printlab setup --keep-selection' ausführen (löst die Profile neu auf)."))
+        "Von 'slicetheprompt setup' erzeugt. Profile ändern: Namen unten anpassen und\n"
+        "'slicetheprompt setup --keep-selection' ausführen (löst die Profile neu auf)."))
     return data
 
 
@@ -341,7 +341,7 @@ def reflatten_from_yaml() -> dict:
     s["files"] = write_flat_profiles(sel, idx)
     s["catalog"] = write_filament_catalog(sel, idx)
     s["cli"] = probe_cli(s["exe"], s.get("kind", "crealityprint"))
-    write_yaml(SLICER_YAML, s, header="Von 'printlab setup' erzeugt.")
+    write_yaml(SLICER_YAML, s, header="Von 'slicetheprompt setup' erzeugt.")
     return s
 
 
@@ -367,10 +367,10 @@ def slicer_cfg(auto: bool = True) -> dict:
     if _slicer_ok(s) or not auto:
         return s
     if _AUTO_SETUP_DONE:
-        raise RuntimeError("Slicer-Einrichtung fehlgeschlagen – 'uv run printlab setup' ausführen und "
+        raise RuntimeError("Slicer-Einrichtung fehlgeschlagen – 'uv run slicetheprompt setup' ausführen und "
                            "die Ausgabe prüfen")
     _AUTO_SETUP_DONE = True
-    exe = os.environ.get("PRINTLAB_SLICER_EXE") or (s.get("exe") if s.get("exe") and Path(s["exe"]).exists()
+    exe = os.environ.get("SLICETHEPROMPT_SLICER_EXE") or (s.get("exe") if s.get("exe") and Path(s["exe"]).exists()
                                                     else None)
     return setup_slicer(exe)
 
@@ -392,7 +392,7 @@ def filament_file(name: str, color: str | None = None, workdir: Path | None = No
     elif name.lower() in (s.get("files", {}).get("filament") or {}):
         src = Path(s["files"]["filament"][name.lower()])
     else:
-        raise KeyError(f"Filamentprofil '{name}' nicht im Katalog. 'printlab filaments' zeigt alle.")
+        raise KeyError(f"Filamentprofil '{name}' nicht im Katalog. 'slicetheprompt filaments' zeigt alle.")
     if not color or workdir is None:
         return str(src)
     data = json.loads(src.read_text(encoding="utf-8"))

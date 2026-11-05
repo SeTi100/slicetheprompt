@@ -12,8 +12,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from meshgen import voxels_to_tris  # noqa: E402
-from printlab import cfs, meshcheck as mc, threemf  # noqa: E402
-from printlab.slicer import gcode_info, gcode_safety  # noqa: E402
+from slicetheprompt import cfs, meshcheck as mc, threemf  # noqa: E402
+from slicetheprompt.slicer import gcode_info, gcode_safety  # noqa: E402
 
 # Zustand wie vom Hi gemeldet (4 PLA-Spulen in CFS 1)
 BOX = {
