@@ -9,8 +9,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from meshgen import box, voxels_to_tris  # noqa: E402
-from printlab import meshcheck as mc  # noqa: E402
-from printlab.stlio import read_stl, write_stl  # noqa: E402
+from slicetheprompt import meshcheck as mc  # noqa: E402
+from slicetheprompt.stlio import read_stl, write_stl  # noqa: E402
 
 CFG = {
     "printer": {"usable": {"x": 250, "y": 250, "z": 290}},

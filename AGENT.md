@@ -1,23 +1,23 @@
-# AGENT.md – Technischer Implementierungsplan: `printlab Studio` (3D-Inspektions-, Markierungs- & Versionierungs-GUI)
+# AGENT.md – Technischer Implementierungsplan: `SliceThePrompt` (3D-Inspektions-, Markierungs- & Versionierungs-GUI)
 
-> **Zweck dieser Datei:** Dies ist die verbindliche, ausführbare Spezifikation für nachgelagerte Coding-Agents (in Antigravity Desktop, `/teamwork-preview`, `/boost` oder Claude Code), um **`printlab Studio`** vollständig (Stufe 1 + 2 + 3) zu implementieren.
+> **Zweck dieser Datei:** Dies ist die verbindliche, ausführbare Spezifikation für nachgelagerte Coding-Agents (in Antigravity Desktop, `/teamwork-preview`, `/boost` oder Claude Code), um **`SliceThePrompt`** vollständig (Stufe 1 + 2 + 3) zu implementieren.
 > - **Laufende CAD-/Druckregeln für Nutzeraufträge** stehen weiterhin in [`AGENTS.md`](./AGENTS.md) und [`CLAUDE.md`](./CLAUDE.md).
 > - **Freigegebene Entscheidungen des Nutzers:**
->   1. **Bereitstellung:** Lokale Web-App über `uv run printlab ui` (`http://127.0.0.1:8765`), kompatibel mit Antigravity Desktop **und** Claude Code.
+>   1. **Bereitstellung:** Lokale Web-App über `uv run slicetheprompt ui` (`http://127.0.0.1:8765`), kompatibel mit Antigravity Desktop **und** Claude Code.
 >   2. **Umfang:** Vollständiger Ausbau (**alle Stufen**: 3D-Viewer, Versions-Snapshots + Geisterbild-Diff, automatische 3D-Fehler-Overlays & Feature-Tagging, interaktive 3D-Bereichsauswahl mit MCP-Rückkanal, AST-Parameter-Editor, 2-Punkt-Messwerkzeug und Moonraker-/CFS-Statusleiste).
 
 ---
 
 ## 1. Architektur-Überblick & Grundprinzipien
 
-1. **Keine eigene KI-/API-Schicht im GUI:** Der Dialog bleibt in Antigravity Desktop bzw. Claude Code. Das GUI ist das **visuelle 3D-Auge und Zeigewerkzeug**, das über Projektdateien und den bestehenden MCP-Server ([`printlab/mcp_server.py`](./printlab/mcp_server.py)) mit dem Agenten gekoppelt ist.
-2. **Null fragile Zusatz-Abhängigkeiten im Backend:** Der lokale UI-Server (`printlab/ui_server.py`) nutzt Pythons Standardbibliothek (`http.server.ThreadingHTTPServer`, `urllib.parse`, Server-Sent Events `text/event-stream`), damit `uv run printlab ui` sofort im bestehenden `.venv` startet, ohne neue C-Pakete kompilieren zu müssen.
-3. **Echte 3D-Darstellung im Browser:** Statisches Frontend unter `printlab/ui/` auf Basis von **Three.js** (`STLLoader`, `OrbitControls`, `TransformControls`/Raycasting, Clipping Planes). Three.js-Module (`three.module.min.js`, `OrbitControls.js`, `STLLoader.js`) werden beim ersten Start oder direkt lokal unter `printlab/ui/vendor/` abgelegt bzw. per Importmap mit lokalem Fallback geladen, sodass das GUI auch offline zuverlässig funktioniert.
+1. **Keine eigene KI-/API-Schicht im GUI:** Der Dialog bleibt in Antigravity Desktop bzw. Claude Code. Das GUI ist das **visuelle 3D-Auge und Zeigewerkzeug**, das über Projektdateien und den bestehenden MCP-Server ([`slicetheprompt/mcp_server.py`](./slicetheprompt/mcp_server.py)) mit dem Agenten gekoppelt ist.
+2. **Null fragile Zusatz-Abhängigkeiten im Backend:** Der lokale UI-Server (`slicetheprompt/ui_server.py`) nutzt Pythons Standardbibliothek (`http.server.ThreadingHTTPServer`, `urllib.parse`, Server-Sent Events `text/event-stream`), damit `uv run slicetheprompt ui` sofort im bestehenden `.venv` startet, ohne neue C-Pakete kompilieren zu müssen.
+3. **Echte 3D-Darstellung im Browser:** Statisches Frontend unter `slicetheprompt/ui/` auf Basis von **Three.js** (`STLLoader`, `OrbitControls`, `TransformControls`/Raycasting, Clipping Planes). Three.js-Module (`three.module.min.js`, `OrbitControls.js`, `STLLoader.js`) werden beim ersten Start oder direkt lokal unter `slicetheprompt/ui/vendor/` abgelegt bzw. per Importmap mit lokalem Fallback geladen, sodass das GUI auch offline zuverlässig funktioniert.
 4. **Strikte Sicherheit:** Das GUI darf **niemals** einen Druck starten (`print_gcode` / `upload_and_print` wird im UI-Server **nicht** exponiert). Drucker- und CFS-Abfragen im GUI sind rein **lesend** (`Moonraker.status()`, `Moonraker.cfs()`).
 
 ### Koordinaten-Vertrag (`model` ↔ `print`)
 
-In [`printlab/pipeline.py`](./printlab/pipeline.py) erzeugt `prepare()` aus `out/model.stl` (Modellkoordinaten aus `model.py`) die Drucklage `out/print.stl` auf dem `260 × 260 mm`-Bett mittels:
+In [`slicetheprompt/pipeline.py`](./slicetheprompt/pipeline.py) erzeugt `prepare()` aus `out/model.stl` (Modellkoordinaten aus `model.py`) die Drucklage `out/print.stl` auf dem `260 × 260 mm`-Bett mittels:
 - Rotationsmatrix $R \in \mathbb{R}^{3 \times 3}$ aus `meshcheck.ORIENTATIONS[orientation]` (`p_rot = p_model @ R.T`)
 - Verschiebungsvektor $s = [s_x, s_y, s_z]$ aus `place_on_bed` (`p_print = p_rot + s`)
 
@@ -36,11 +36,11 @@ Die Umsetzung ist in **5 sauber getrennte Arbeitspakete (WP-1 bis WP-5)** geglie
 
 | Paket | Neue / Geänderte Dateien | Abhängigkeit | Kurzbeschreibung |
 | --- | --- | --- | --- |
-| **WP-1** | `printlab/history.py` *(neu)*, `printlab/params.py` *(neu)*, `printlab/pipeline.py`, `.gitignore` | keine | Automatische Versions-Snapshots (`v001`…), Rollback, AST-Parameter-Extraktion & -Update |
-| **WP-2** | `lib/parts.py`, `printlab/_cad_runner.py`, `printlab/meshcheck.py`, `printlab/pipeline.py` | keine | 3D-Fehler-Diagnostik (`diagnostics_3d.json`), Feature-Tagging (`tag`, `sub_tag`) & Erkennung „leerer Schnitte“ (`ghost_*.stl`) |
-| **WP-3** | `printlab/ui_server.py` *(neu)*, `printlab/cli.py` | WP-1, WP-2 | Lokaler HTTP/SSE-Server (`uv run printlab ui`), REST-API für Projekte, Versionen, Parameter, Feedback & Moonraker-Readonly |
-| **WP-4** | `printlab/ui/index.html`, `printlab/ui/app.js`, `printlab/ui/styles.css`, `printlab/ui/vendor/*` *(alle neu)* | WP-3 | Interaktives Three.js-Studio: 3D-Viewer, Geisterbild-Diff, Fehler-Overlays, Pin/Box/Vektor-Markierung + Screenshot, Messband, Parameter-Panel |
-| **WP-5** | `printlab/mcp_server.py`, `.agents/skills/teil/SKILL.md`, `.claude/commands/teil.md`, `AGENTS.md`, `CLAUDE.md`, `tests/test_ui_and_history.py` *(neu)* | WP-1..4 | MCP-Tools (`get_ui_feedback`, `clear_ui_feedback`, `version_list`, `version_restore`), Agent-Workflow-Integration & vollständige Test-Suite |
+| **WP-1** | `slicetheprompt/history.py` *(neu)*, `slicetheprompt/params.py` *(neu)*, `slicetheprompt/pipeline.py`, `.gitignore` | keine | Automatische Versions-Snapshots (`v001`…), Rollback, AST-Parameter-Extraktion & -Update |
+| **WP-2** | `lib/parts.py`, `slicetheprompt/_cad_runner.py`, `slicetheprompt/meshcheck.py`, `slicetheprompt/pipeline.py` | keine | 3D-Fehler-Diagnostik (`diagnostics_3d.json`), Feature-Tagging (`tag`, `sub_tag`) & Erkennung „leerer Schnitte“ (`ghost_*.stl`) |
+| **WP-3** | `slicetheprompt/ui_server.py` *(neu)*, `slicetheprompt/cli.py` | WP-1, WP-2 | Lokaler HTTP/SSE-Server (`uv run slicetheprompt ui`), REST-API für Projekte, Versionen, Parameter, Feedback & Moonraker-Readonly |
+| **WP-4** | `slicetheprompt/ui/index.html`, `slicetheprompt/ui/app.js`, `slicetheprompt/ui/styles.css`, `slicetheprompt/ui/vendor/*` *(alle neu)* | WP-3 | Interaktives Three.js-Studio: 3D-Viewer, Geisterbild-Diff, Fehler-Overlays, Pin/Box/Vektor-Markierung + Screenshot, Messband, Parameter-Panel |
+| **WP-5** | `slicetheprompt/mcp_server.py`, `.agents/skills/teil/SKILL.md`, `.claude/commands/teil.md`, `AGENTS.md`, `CLAUDE.md`, `tests/test_ui_and_history.py` *(neu)* | WP-1..4 | MCP-Tools (`get_ui_feedback`, `clear_ui_feedback`, `version_list`, `version_restore`), Agent-Workflow-Integration & vollständige Test-Suite |
 
 > **Hinweis bei Änderungen an `pipeline.py`:** WP-1 und WP-2 berühren unterschiedliche Stellen in `pipeline.py` (`prepare`/`check` vs. `run_all`-Snapshot-Hook). Bei paralleler Bearbeitung erst WP-2 in `prepare`/`check` integrieren, danach den Snapshot-Aufruf am Ende von `run_all` einhängen.
 
@@ -50,7 +50,7 @@ Die Umsetzung ist in **5 sauber getrennte Arbeitspakete (WP-1 bis WP-5)** geglie
 
 ### WP-1: Versionshistorie & AST-Parameter-Editor
 
-#### 1.1 `printlab/history.py` *(neu)*
+#### 1.1 `slicetheprompt/history.py` *(neu)*
 Legt unter `projects/<projekt>/history/v001/`, `v002/`, … unveränderliche Snapshots jedes erfolgreichen Laufs an.
 
 - **Ordnerinhalt je Version `vNNN` (3-stellig, ab `v001`):**
@@ -71,15 +71,15 @@ Legt unter `projects/<projekt>/history/v001/`, `v002/`, … unveränderliche Sna
     }
     ```
   - Kopien von: `model.py`, `spec.yaml`, `out/model.stl`, `out/print.stl`, alle `out/print_*.stl`, `out/print.json`, `out/report.json`, `out/diagnostics_3d.json` (falls vorhanden), `out/render.png`.
-- **Funktionen in `printlab/history.py`:**
+- **Funktionen in `slicetheprompt/history.py`:**
   - `save_snapshot(project: str, reason: str = "build_and_check") -> dict`: Prüft per SHA-256 von `model.py` + `spec.yaml` + `out/print.stl`, ob der Stand identisch zur letzten Version ist; falls identisch, keinen doppelten Snapshot anlegen, sondern die letzte `meta.json` zurückgeben. Sonst nächsten `vNNN`-Ordner schreiben. Maximal 50 Versionen je Projekt behalten (älteste bei Bedarf aufräumen oder konfigurierbar lassen).
   - `list_versions(project: str) -> list[dict]`: Liest alle `history/v*/meta.json` chronologisch sortiert.
   - `restore_version(project: str, version: str) -> dict`: Sichert – falls der aktuelle `model.py`-Stand noch keinen Snapshot hat – diesen zuerst als Snapshot (`reason="auto_backup_before_restore"`), kopiert dann `model.py` und `spec.yaml` aus `history/<version>/` ins Projektverzeichnis und führt `pipeline.run_all(project)` aus (legt dabei regulär die wiederhergestellte Fassung als aktuellen Arbeitsstand an).
   - `diff_code(project: str, v_old: str, v_new: str) -> str`: Liefert `unified_diff` zwischen `v_old/model.py` und `v_new/model.py`.
 - **`.gitignore` ergänzen:** Zeile `projects/*/history/` hinzufügen (Snapshots enthalten STLs/PNGs und gehören wie `out/` nicht ins Git-Repo).
-- **Hook in `printlab/pipeline.py`:** Am Ende von `run_all(project, orientation)` automatisch `save_snapshot(project, reason="build_and_check")` aufrufen und `"version": snap["version"]` im Rückgabe-Dict ergänzen.
+- **Hook in `slicetheprompt/pipeline.py`:** Am Ende von `run_all(project, orientation)` automatisch `save_snapshot(project, reason="build_and_check")` aufrufen und `"version": snap["version"]` im Rückgabe-Dict ergänzen.
 
-#### 1.2 `printlab/params.py` *(neu)*
+#### 1.2 `slicetheprompt/params.py` *(neu)*
 Liest und aktualisiert numerische Top-Level-Parameter am Anfang von `model.py` per Python-`ast` (ohne Regex-Gebastel!).
 
 - **Unterstützte Muster in `model.py`:**
@@ -97,7 +97,7 @@ Liest und aktualisiert numerische Top-Level-Parameter am Anfang von `model.py` p
 
 Dieses Paket löst das Kernproblem: *„Wo genau am Teil liegt ein geometrischer oder räumlicher Fehler?“*
 
-#### 2.1 Semantisches Feature-Tagging in `lib/parts.py` und `printlab/_cad_runner.py`
+#### 2.1 Semantisches Feature-Tagging in `lib/parts.py` und `slicetheprompt/_cad_runner.py`
 In `lib/parts.py` eine globale Liste `FEATURES: list[dict] = []` einführen (analog zu `WARNINGS`):
 
 - **`tag(name: str, shape, role: str = "feature")`**:
@@ -110,13 +110,13 @@ In `lib/parts.py` eine globale Liste `FEATURES: list[dict] = []` einführen (ana
     - Fügt automatisch einen Hinweis zu `WARNINGS` hinzu: `f"Schnitt '{name}' hat kein Material abgetragen (liegt ausserhalb des Körpers!)"`.
     - Markiert das Feature mit `"empty_cut": True`.
   - **Automatische Teil-Abtrag-Warnung (`partial_cut`, Info):** Optional melden, falls `removed < 0.15 * cutter_volume` (z. B. Bohrung schneidet nur den äußersten Plattenrand an).
-- **Auswertung in `printlab/_cad_runner.py`:**
+- **Auswertung in `slicetheprompt/_cad_runner.py`:**
   - Liest `getattr(lp, "FEATURES", [])` aus.
   - Exportiert für jedes Feature mit `empty_cut == True` dessen `_shape` als eigenes Hilfsnetz `out/ghost_<slug>.stl` (damit das GUI ein neben der Platte im Nichts schwebendes Bohrloch **rot-transparent im Raum** anzeigen kann!).
   - Schreibt die serialisierbaren Metadaten (ohne `_shape`) als `"features": [...]` in `out/build.json` und fügt bei `empty_cut == True` einen fehlgeschlagenen Check (`ok: False`) in `result["checks"]` ein, damit `build_and_check` den Agenten sofort zwingt, die falsche Lochposition zu korrigieren!
 
-#### 2.2 Dreiecksgenaue 3D-Problemzonen in `printlab/meshcheck.py` & `out/diagnostics_3d.json`
-In `printlab/meshcheck.py` eine neue Funktion `diagnostics_3d(print_tris: np.ndarray, cfg: dict, build_data: dict | None = None, print_info: dict | None = None) -> dict` ergänzen, die während `pipeline.check(project)` ausgeführt wird und `out/diagnostics_3d.json` (in **Druckbettkoordinaten** + mit Transformationsdaten zu Modellkoordinaten) schreibt:
+#### 2.2 Dreiecksgenaue 3D-Problemzonen in `slicetheprompt/meshcheck.py` & `out/diagnostics_3d.json`
+In `slicetheprompt/meshcheck.py` eine neue Funktion `diagnostics_3d(print_tris: np.ndarray, cfg: dict, build_data: dict | None = None, print_info: dict | None = None) -> dict` ergänzen, die während `pipeline.check(project)` ausgeführt wird und `out/diagnostics_3d.json` (in **Druckbettkoordinaten** + mit Transformationsdaten zu Modellkoordinaten) schreibt:
 
 1. **`thin_walls`**:
    - Nutzt die bereits in `wall_thickness()` berechneten Strahl-Distanzen je Dreieck.
@@ -134,17 +134,17 @@ In `printlab/meshcheck.py` eine neue Funktion `diagnostics_3d(print_tris: np.nda
 
 ---
 
-### WP-3: Lokaler Backend-Server (`printlab/ui_server.py` & CLI)
+### WP-3: Lokaler Backend-Server (`slicetheprompt/ui_server.py` & CLI)
 
-#### 3.1 CLI-Einstieg in `printlab/cli.py`
+#### 3.1 CLI-Einstieg in `slicetheprompt/cli.py`
 Neues Subcommand `ui`:
 ```powershell
-uv run printlab ui [--project <name>] [--port 8765] [--no-browser]
+uv run slicetheprompt ui [--project <name>] [--port 8765] [--no-browser]
 ```
 Startet den Server auf `127.0.0.1:8765` (falls Port belegt, nächsten freien Port `8766..8775` wählen und klar ausgeben) und öffnet standardmäßig `webbrowser.open(url)`.
 
-#### 3.2 Endpunkte in `printlab/ui_server.py`
-Statische Auslieferung von `printlab/ui/*` unter `/` sowie folgende JSON-Endpunkte:
+#### 3.2 Endpunkte in `slicetheprompt/ui_server.py`
+Statische Auslieferung von `slicetheprompt/ui/*` unter `/` sowie folgende JSON-Endpunkte:
 
 - `GET /api/projects` → Liste aller Projekte aus `pipeline.list_projects()` inkl. letztem Änderungszeitpunkt (`mtime`), aktivem Prüfstatus (`passed`), Versionsanzahl und ob ein offenes `ui_feedback.json` existiert.
 - `GET /api/projects/<project>/state` → Komplettpaket des Projekts:
@@ -166,7 +166,7 @@ Statische Auslieferung von `printlab/ui/*` unter `/` sowie folgende JSON-Endpunk
 
 ---
 
-### WP-4: Interaktives Three.js-Frontend (`printlab/ui/`)
+### WP-4: Interaktives Three.js-Frontend (`slicetheprompt/ui/`)
 
 Dunkles, klares Engineering-Layout (Tailwind oder schlankes modernes CSS Grid in `styles.css`, keine Build-Toolchain wie Webpack/Node nötig – direkt ausführbare ES-Module!).
 
@@ -259,7 +259,7 @@ Dunkles, klares Engineering-Layout (Tailwind oder schlankes modernes CSS Grid in
 }
 ```
 
-### 4.2 Neue MCP-Tools in `printlab/mcp_server.py` (und CLI-Pendants in `printlab/cli.py`)
+### 4.2 Neue MCP-Tools in `slicetheprompt/mcp_server.py` (und CLI-Pendants in `slicetheprompt/cli.py`)
 1. **`get_ui_feedback(project: str = "") -> dict`**:
    - Liest `out/ui_feedback.json` des angegebenen (oder zuletzt geänderten) Projekts.
    - Gibt das vollständige JSON inkl. absolutem Pfad `screenshot` (`out/ui_feedback.png`) zurück, mit dem Hinweis an den Agenten, `ui_feedback.png` zusätzlich per `read_file`/`Read` anzusehen und nach erfolgreicher Umsetzung `clear_ui_feedback(project)` aufzurufen.
@@ -271,8 +271,8 @@ Dunkles, klares Engineering-Layout (Tailwind oder schlankes modernes CSS Grid in
 ### 4.3 Anpassung der Skills & Arbeitsregeln
 - In [`.agents/skills/teil/SKILL.md`](./.agents/skills/teil/SKILL.md) und [`.claude/commands/teil.md`](./.claude/commands/teil.md) (und Kopie nach `.claude/commands/teil.md`):
   - Bei Änderungen an einem bestehenden Projekt zuerst prüfen, ob `out/ui_feedback.json` vorliegt (`get_ui_feedback`). Falls ja: die exakten `model_xyz` / `delta_model_mm` / `bbox_model`-Angaben und `ui_feedback.png` nutzen, nach erfolgreichem Rebuild `clear_ui_feedback` aufrufen.
-  - Empfehlung aufnehmen, bei mehrteiligen Geometrien (Platte + Wände + Bohrungen) wichtige Elemente mit `tag("name", ...)` bzw. `cut_feature(part, "loch_1", ...)` aus `lib.parts` zu benennen, damit `printlab Studio` sie einzeln auswählbar macht und verfehlte Schnitte automatisch erkennt.
-- Kurzen Einzeiler-Verweis auf `uv run printlab ui` und `get_ui_feedback` in [`AGENTS.md`](./AGENTS.md), [`CLAUDE.md`](./CLAUDE.md) und [`README.md`](./README.md) ergänzen.
+  - Empfehlung aufnehmen, bei mehrteiligen Geometrien (Platte + Wände + Bohrungen) wichtige Elemente mit `tag("name", ...)` bzw. `cut_feature(part, "loch_1", ...)` aus `lib.parts` zu benennen, damit `SliceThePrompt` sie einzeln auswählbar macht und verfehlte Schnitte automatisch erkennt.
+- Kurzen Einzeiler-Verweis auf `uv run slicetheprompt ui` und `get_ui_feedback` in [`AGENTS.md`](./AGENTS.md), [`CLAUDE.md`](./CLAUDE.md) und [`README.md`](./README.md) ergänzen.
 
 ---
 
@@ -296,7 +296,7 @@ Bevor die Implementierung als abgeschlossen gemeldet wird, **müssen** alle folg
    - `test_diagnostics_3d_and_coord_transform`: Dünne Wand + Überhang erscheinen mit gültigen `tri_indices` in `diagnostics_3d.json`; Rücktransformation `p_model = (p_print - shift) @ R` stimmt für alle 6 `ORIENTATIONS` auf `< 1e-6 mm`.
    - `test_ui_http_endpoints_and_feedback`: Startet den `ThreadingHTTPServer` auf Port `0` (ephemerer Testport), prüft `GET /`, `GET /api/projects`, `GET /api/projects/<p>/state`, `POST /api/projects/<p>/feedback` (inkl. PNG-Dekodierung), `get_ui_feedback` via MCP-Funktion und Path-Traversal-Abwehr (`403`/`404` bei `../`).
 3. **End-to-End-Probelauf an den realen Beispielprojekten:**
-   - `uv run printlab run beispiel-box-m3` und `uv run printlab run beispiel-schild-zweifarbig` erzeugen jeweils `history/v001/` und `out/diagnostics_3d.json`.
-   - `uv run printlab ui --no-browser` startet sauber und beantwortet `http://127.0.0.1:8765/api/projects` mit HTTP `200`.
+   - `uv run slicetheprompt run beispiel-box-m3` und `uv run slicetheprompt run beispiel-schild-zweifarbig` erzeugen jeweils `history/v001/` und `out/diagnostics_3d.json`.
+   - `uv run slicetheprompt ui --no-browser` startet sauber und beantwortet `http://127.0.0.1:8765/api/projects` mit HTTP `200`.
 4. **Hinweis an den Nutzer nach Abschluss:**
-   Erinnern, den MCP-Server `printlab` in Antigravity Desktop (**Additional Options (...) > MCP Servers**) bzw. Claude Code (`/mcp`) neu zu laden, damit die neuen Tools `get_ui_feedback`, `clear_ui_feedback`, `version_list` und `version_restore` aktiv sind.
+   Erinnern, den MCP-Server `slicetheprompt` in Antigravity Desktop (**Additional Options (...) > MCP Servers**) bzw. Claude Code (`/mcp`) neu zu laden, damit die neuen Tools `get_ui_feedback`, `clear_ui_feedback`, `version_list` und `version_restore` aktiv sind.

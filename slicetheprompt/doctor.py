@@ -46,7 +46,7 @@ def run_doctor(fix: bool = True) -> dict:
         out["ok"] = False
         out["slicer"] = {"ok": False, "error": str(exc),
                          "hint": "Creality Print installieren ('winget install -e --id Creality.CrealityPrint' "
-                                 "oder setup.ps1) bzw. Pfad mit 'uv run printlab setup --exe …' angeben"}
+                                 "oder setup.ps1) bzw. Pfad mit 'uv run slicetheprompt setup --exe …' angeben"}
 
     # CAD
     try:

@@ -1,9 +1,9 @@
 <#
 .SYNOPSIS
-    Startet printlab Studio (3D-Inspektions- & Markierungs-GUI) für slicetheprompt.
+    Startet SliceThePrompt (3D-Inspektions- & Markierungs-GUI) für slicetheprompt.
 .DESCRIPTION
     Prüft die Python-Umgebung, startet den lokalen Webserver auf Port 8765
-    und öffnet printlab Studio automatisch im Standard-Webbrowser.
+    und öffnet SliceThePrompt automatisch im Standard-Webbrowser.
 #>
 
 [CmdletBinding()]
@@ -18,7 +18,7 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 Set-Location $ScriptDir
 
 Write-Host "==========================================================" -ForegroundColor Cyan
-Write-Host "  printlab Studio - 3D-Prüfstand (Creality Hi Combo)" -ForegroundColor Cyan
+Write-Host "  SliceThePrompt - 3D-Prüfstand (Creality Hi Combo)" -ForegroundColor Cyan
 Write-Host "==========================================================" -ForegroundColor Cyan
 
 # 1. Prüfe uv / .venv
@@ -28,7 +28,7 @@ if (-not (Test-Path "$ScriptDir\.venv")) {
 }
 
 # 2. Argumente zusammenbauen
-$ArgsList = @("run", "printlab", "ui", "--port", "$Port")
+$ArgsList = @("run", "slicetheprompt", "ui", "--port", "$Port")
 if ($Project) {
     $ArgsList += @("--project", $Project)
 }

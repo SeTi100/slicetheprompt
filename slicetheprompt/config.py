@@ -11,7 +11,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG_DIR = ROOT / "config"
 PROJECTS_DIR = ROOT / "projects"
-STATE_DIR = ROOT / ".printlab"
+STATE_DIR = ROOT / ".slicetheprompt"
 
 PRINTER_YAML = CONFIG_DIR / "printer.yaml"
 CALIBRATION_YAML = CONFIG_DIR / "calibration.yaml"

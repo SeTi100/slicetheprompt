@@ -1,4 +1,4 @@
-"""Kommandozeile:  uv run printlab <befehl> …   (dieselben Funktionen wie der MCP-Server)."""
+"""Kommandozeile:  uv run slicetheprompt <befehl> …   (dieselben Funktionen wie der MCP-Server)."""
 
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ def _cube_stl(path: Path, a: float = 20.0) -> Path:
 
 def write_client_configs() -> list[str]:
     """Clients ausserhalb des Projekts eintragen, die schon installiert sind (Antigravity).
-    Claude Code nutzt die versionierte .mcp.json; Claude Desktop: 'printlab install claude-desktop'."""
+    Claude Code nutzt die versionierte .mcp.json; Claude Desktop: 'slicetheprompt install claude-desktop'."""
     from .clients import install
     done = []
     if (Path.home() / ".gemini" / "config").exists():
@@ -51,10 +51,10 @@ def cmd_setup(a) -> int:
 
     ok = True
     print("== 1/5 MCP-Konfiguration")
-    print("    Claude Code: .mcp.json im Projekt (versioniert, startet printlab über uv)")
+    print("    Claude Code: .mcp.json im Projekt (versioniert, startet slicetheprompt über uv)")
     for line in write_client_configs():
         print("   ", line)
-    print("    Claude Desktop: 'uv run printlab install claude-desktop' (App vorher beenden)")
+    print("    Claude Desktop: 'uv run slicetheprompt install claude-desktop' (App vorher beenden)")
 
     print("== 2/5 Drucker und CFS")
     try:
@@ -136,7 +136,7 @@ def cmd_setup(a) -> int:
 def main(argv=None) -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
-    ap = argparse.ArgumentParser(prog="printlab", description="Prompt-to-Print für den Creality Hi")
+    ap = argparse.ArgumentParser(prog="slicetheprompt", description="Prompt-to-Print für den Creality Hi")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     s = sub.add_parser("setup", help="Slicer/Profile einrichten, Drucker testen, .mcp.json schreiben")
@@ -144,7 +144,7 @@ def main(argv=None) -> int:
     s.add_argument("--keep-selection", action="store_true", help="Profilnamen aus slicer.yaml beibehalten")
 
     sub.add_parser("doctor", help="Drucker, CFS, Slicer und CAD prüfen (richtet den Slicer bei Bedarf ein)")
-    s = sub.add_parser("install", help="printlab in einen KI-Client eintragen")
+    s = sub.add_parser("install", help="slicetheprompt in einen KI-Client eintragen")
     s.add_argument("client", choices=["claude-desktop", "claude-code", "antigravity"])
     s.add_argument("--force", action="store_true", help="auch wenn die Claude-App läuft")
     s.add_argument("--config", help="Pfad zur claude_desktop_config.json (Einstellungen → Entwickler zeigt ihn)")
@@ -189,7 +189,7 @@ def main(argv=None) -> int:
     s.add_argument("material")
     s.add_argument("values", nargs="+")
 
-    s = sub.add_parser("ui", help="printlab Studio (lokales 3D-Inspektions- & Markierungs-GUI) starten")
+    s = sub.add_parser("ui", help="SliceThePrompt (lokales 3D-Inspektions- & Markierungs-GUI) starten")
     s.add_argument("--project", default=None, help="Direkt dieses Projekt öffnen")
     s.add_argument("--port", type=int, default=8765, help="HTTP-Port (Standard: 8765)")
     s.add_argument("--no-browser", action="store_true", help="Browser nicht automatisch öffnen")

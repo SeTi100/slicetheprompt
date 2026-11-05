@@ -1,4 +1,4 @@
-"""MCP-Server 'printlab' für Claude Code (stdio).
+"""MCP-Server 'slicetheprompt' für Claude Code (stdio).
 
 Wichtig: Dieser Prozess darf nichts auf stdout schreiben (das ist der MCP-Kanal).
 """
@@ -20,14 +20,14 @@ from .config import load_config
 from .moonraker import Moonraker
 
 INSTRUCTIONS = """\
-printlab erzeugt druckfertige Teile für den Creality Hi Combo (0,4-mm-Düse, PLA/PETG).
+slicetheprompt erzeugt druckfertige Teile für den Creality Hi Combo (0,4-mm-Düse, PLA/PETG).
 Ablauf: project_new → spec.yaml und model.py schreiben → build_and_check → Render ansehen →
 cfs_status/filament_plan → slice → Nutzer bestätigt mit 'drucken' → upload_and_print(token).
 Mehrfarbig: in model.py `bodies = {name: Körper}`, Spule je Körper in spec.yaml → filament.
 Regeln und Toleranzen: config/printer.yaml (und calibration.yaml). Nie ohne ausdrückliche Bestätigung drucken.
 """
 
-server = _Server("printlab", instructions=INSTRUCTIONS)
+server = _Server("slicetheprompt", instructions=INSTRUCTIONS)
 
 
 def _safe(fn, *a, **k) -> dict:
@@ -198,7 +198,7 @@ def get_config() -> dict:
 
 @server.tool()
 def get_ui_feedback(project: str = "") -> dict:
-    """Liest das vom Nutzer in printlab Studio (3D-GUI) gespeicherte räumliche Feedback
+    """Liest das vom Nutzer in SliceThePrompt (3D-GUI) gespeicherte räumliche Feedback
     (Pins, Bereichsboxen, Von->Nach-Verschiebepfeile in Modellkoordinaten `model_xyz` sowie
     den Pfad zum markierten Screenshot `out/ui_feedback.png`).
     Falls `project` leer ist, wird das zuletzt markierte Projekt zurückgegeben.

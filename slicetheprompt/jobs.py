@@ -1,6 +1,6 @@
 """Slicen mit Spulenwahl (CFS) und Freigabe-Token; Druckstart nur für genau den gezeigten G-Code.
 
-Werkzeug-Nummer = logischer CFS-Platz: T0 = T1A, T1 = T1B, … (siehe printlab.cfs).
+Werkzeug-Nummer = logischer CFS-Platz: T0 = T1A, T1 = T1B, … (siehe slicetheprompt.cfs).
 """
 
 from __future__ import annotations

@@ -1,4 +1,4 @@
-"""Lokaler Web-Server (HTTP + SSE) für printlab Studio (WP-3).
+"""Lokaler Web-Server (HTTP + SSE) für SliceThePrompt (WP-3).
 
 Rein lesender Zugriff auf Moonraker/CFS – startet NIEMALS einen Druck!
 """
@@ -700,7 +700,7 @@ def serve_ui(
     project: str | None = None,
     open_browser: bool = True,
 ) -> int:
-    """Startet printlab Studio im Vordergrund bis Ctrl+C."""
+    """Startet SliceThePrompt im Vordergrund bis Ctrl+C."""
     srv = create_server(host=host, port=port, projects_dir=PROJECTS_DIR)
     actual_port = srv.server_address[1]
     url = f"http://{host}:{actual_port}/"
@@ -711,14 +711,14 @@ def serve_ui(
             resolved = project
         url += f"?project={urllib.parse.quote(resolved)}"
 
-    print(f"printlab Studio läuft auf: {url}", flush=True)
+    print(f"SliceThePrompt läuft auf: {url}", flush=True)
     if open_browser:
         threading.Timer(0.35, lambda: webbrowser.open(url)).start()
 
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
-        print("\nprintlab Studio beendet.", flush=True)
+        print("\nSliceThePrompt beendet.", flush=True)
     finally:
         srv.shutdown()
         srv.server_close()
