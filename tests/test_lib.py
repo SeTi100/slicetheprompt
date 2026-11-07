@@ -89,6 +89,84 @@ def test_worker_reports_errors_as_result():
     assert {"server_gestartet", "veraltet"} <= set(code_stand())
 
 
+CFG_W = {**CFG, "rules": {**CFG["rules"], "layer_height": 0.2, "line_width": 0.42}}
+
+
+def _mesh(part):
+    import tempfile
+
+    from build123d import export_stl
+
+    from slicetheprompt.stlio import read_stl
+    with tempfile.TemporaryDirectory() as td:
+        f = Path(td) / "m.stl"
+        export_stl(part, str(f), tolerance=0.01, angular_tolerance=0.1)
+        return read_stl(f)
+
+
+def _rule(rep, text):
+    return [c for c in rep.checks if text in c.rule]
+
+
+def test_wall_classes_detail_edge_wall():
+    from build123d import Polygon, Rot
+    # Platte mit Gravur: Nuten 0,5 breit, 0,6 tief, Teilung 1 mm → Stege 0,5 = Oberflächendetail
+    plate = Box(30, 20, 3, align=C)
+    for i in range(-10, 11):
+        plate -= Pos(i, 0, 2.4) * Box(0.5, 10, 1, align=C)
+    rep = mc.analyse(_mesh(plate), CFG_W)
+    assert _rule(rep, "Mindestwandstärke")[0].ok
+    assert not _rule(rep, "Oberflächendetails")[0].ok
+    # Keil mit 30°-Schneide → spitze Kante, keine Wand
+    keil = Rot(90, 0, 0) * extrude(Polygon((0, 0), (20, 0), (0, 20 * math.tan(math.radians(30))), align=None), 10)
+    rep = mc.analyse(_mesh(keil), CFG_W)
+    assert _rule(rep, "Mindestwandstärke")[0].ok
+    assert not _rule(rep, "Spitze Kanten")[0].ok
+    # frei stehende Finne 0,5 mm → echte Wand, Fehler
+    finne = Box(20, 20, 2, align=C) + Box(0.5, 10, 10, align=C)
+    rep = mc.analyse(_mesh(finne), CFG_W)
+    assert not _rule(rep, "Mindestwandstärke")[0].ok
+    # dieselbe Finne mit role="duenn" → nur Hinweis
+    rep = mc.analyse(_mesh(finne), CFG_W, thin_boxes=[((-0.25, -5, 0), (0.25, 5, 10))])
+    assert _rule(rep, "Mindestwandstärke")[0].ok
+    assert _rule(rep, "Bewusst dünn")[0].severity == "info"
+
+
+def test_zone_groups_and_checks_ge():
+    from slicetheprompt.pipeline import zone_summary
+    t = box(4, 4, 4)
+    z = lambda x: {"label": "Oberflächendetail (0.50 mm < 0.84 mm, ≤ 3 Schichten)", "severity": "warn",
+                   "klasse": "detail", "min_mm": 0.5 + x / 100, "bbox_model": [x, 0, 2, x + 0.1, 1, 3],
+                   "bbox_print": [x, 0, 2, x + 0.1, 1, 3], "tri_indices": [x]}
+    diag = {"thin_walls": [z(i) for i in range(3)],
+            "features": [{"name": "striche", "role": "cut", "bbox_model": [-1, -1, 1, 5, 2, 4]}]}
+    out = zone_summary(diag, t, [{"rule": "Oberflächendetails dünner als min_wall (≤ 3 Schichten)"}])
+    assert len(out) == 1 and out[0]["art"].startswith("3 × Oberflächendetail") and out[0]["feature"] == "striche"
+    # checks mit ">=": über den CAD-Runner
+    import json
+    import subprocess
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        m = Path(td) / "model.py"
+        m.write_text("from build123d import *\npart = Box(10, 10, 2)\n"
+                     "checks = {'Rand': (3.2, '>=', 3), 'Höhe': (2.0, '<=', 1.5), 'Breite': (10.0, 10, 0.01)}\n",
+                     encoding="utf-8")
+        subprocess.run([sys.executable, "-m", "slicetheprompt._cad_runner", str(m), td], capture_output=True,
+                       cwd=Path(__file__).resolve().parents[1], timeout=120)
+        ch = {c["name"]: c for c in json.loads((Path(td) / "build.json").read_text(encoding="utf-8"))["checks"]}
+    assert ch["Rand"]["ok"] and ch["Rand"]["soll"] == "≥ 3"
+    assert not ch["Höhe"]["ok"] and ch["Höhe"]["soll"] == "≤ 1.5"
+    assert ch["Breite"]["ok"]
+
+
+def test_inlay_depth_and_stroke():
+    grund = Box(40, 20, 3, align=C)
+    duenn = Pos(0, 0, 2.7) * Box(10, 0.3, 0.3, align=C)      # 0,3 tief, 0,3 breit → beides Fehler
+    rep = mc.analyse_bodies({"grund": _mesh(grund - duenn), "schrift": _mesh(duenn)}, CFG_W)
+    fehler = {c.rule for c in rep.checks if not c.ok and c.severity == "error"}
+    assert "[schrift] Einlage-Tiefe" in fehler and "[schrift] Strichbreite (1. Perzentil)" in fehler
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

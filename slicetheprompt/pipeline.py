@@ -31,6 +31,7 @@ material: {material}        # pla | petg
 qualitaet: standard         # fein (0.12) | standard (0.20) | grob (0.28)
 menge: 1
 koerper: null               # getrennte Teile in einem Druck (z. B. 3 Testringe); leer = ein zusammenhängender Körper
+wand_soll: null             # vom Nutzer gewünschte Wandstärke unter 1,6 mm (z. B. 1.2) – Warnung richtet sich danach
 # Filament/Spule: leer = passende Spule automatisch (meiste Restmenge).
 #   einfarbig:  filament: T1C        oder  filament: schwarz   oder  filament: "#FF0000"
 #   mehrfarbig: filament: {{grundkoerper: weiss, schrift: T1D}}   (Schlüssel = Namen in bodies)
@@ -235,23 +236,28 @@ def check(project: str) -> dict:
     if not (out / "print.json").exists():
         prepare(project)
     names = body_names(d)
+    bi = build_info(d)
+    po = json.loads((out / "print.json").read_text(encoding="utf-8"))
+    R = po.get("rotation_matrix")
+    thin_boxes = [(f["bbox_min"], f["bbox_max"]) for f in bi.get("features", [])
+                  if f.get("role") == "duenn" and f.get("bbox_min")]
     if names:
         model_rep = mc.analyse_bodies(_load_bodies(d, "body"), cfg, spec=spec,
-                                      print_bodies=_load_bodies(d, "print"))
+                                      print_bodies=_load_bodies(d, "print"), R=R, thin_boxes=thin_boxes)
         print_checks = []
         print_metrics = model_rep.metrics.get("print", {})
         print_size = model_rep.metrics["size_mm"]
     else:
-        model_rep = mc.analyse(read_stl(out / "model.stl"), cfg, spec=spec)
-        print_rep = mc.analyse(read_stl(out / "print.stl"), cfg, print_orientation=True)
+        model_rep = mc.analyse(read_stl(out / "model.stl"), cfg, spec=spec, R=R, thin_boxes=thin_boxes)
+        print_rep = mc.analyse(read_stl(out / "print.stl"), cfg, print_orientation=True, walls=False)
         seen = {c.rule for c in model_rep.checks}
         print_checks = [c for c in print_rep.checks if c.rule not in seen]
         print_metrics = print_rep.metrics.get("print", {})
         print_size = print_rep.metrics["size_mm"]
 
-    bi = build_info(d)
     for c in bi.get("checks", []):
-        model_rep.add(f"Mass: {c['name']}", c["ok"], f"{c['ist']}", f"{c['soll']} ± {c['tol']}")
+        limit = c["soll"] if isinstance(c["soll"], str) else f"{c['soll']} ± {c['tol']}"
+        model_rep.add(f"Mass: {c['name']}", c["ok"], f"{c['ist']}", limit)
     if bi.get("valid") is False:
         model_rep.add("CAD-Körper gültig (OCCT)", False, "ungültig", "gültig")
     for w in bi.get("warnings", []):
@@ -260,7 +266,6 @@ def check(project: str) -> dict:
     all_checks = model_rep.checks + print_checks
     errors = [c.as_dict() for c in all_checks if not c.ok and c.severity == "error"]
     warnings = [c.as_dict() for c in all_checks if not c.ok and c.severity == "warn"]
-    po = json.loads((out / "print.json").read_text(encoding="utf-8"))
     report = {
         "project": d.name,
         "passed": not errors,
@@ -284,52 +289,93 @@ def check(project: str) -> dict:
     return report
 
 
-# Fehlerzone (diagnostics_3d) → zugehörige Prüfregel (Teilstring) und Hinweis zur Behebung
+# Fehlerzone (diagnostics_3d) → zugehörige Prüfregel(n) (Teilstring) und Hinweis zur Behebung.
+# Dünne Stellen je Klasse (meshcheck.classify_thin): eigene Regel und eigener Hinweis.
 _ZONE_KINDS = {
     "open_edges": (("wasserdicht", "manifold", "Normalen"),
                    "Netz offen/nicht-manifold – meist sich nur berührende Körper oder Naht eines Sweeps; überlappen "
                    "lassen, Abstand geben oder Anfangswinkel drehen"),
-    "floating_parts": ("", "Körper ohne Bettkontakt – absenken oder mit dem Rest verbinden"),
-    "thin_walls": ("Mindestwandstärke", "Wand verstärken oder Detail weglassen"),
-    "bad_bridges": ("Brücken", "Brücke kürzen, 45°-Fase darunter oder andere Drucklage"),
-    "overhangs": ("Überhang", "45°-Fase/Rundung darunter oder andere Drucklage"),
+    "floating_parts": ((), "Körper ohne Bettkontakt – absenken oder mit dem Rest verbinden"),
+    "thin_walls:wand": (("Mindestwandstärke",),
+                        "Wand verstärken (≥ min_wall) oder Detail weglassen. Gewollt dünn (Norm-Profil, Gitter)? "
+                        "Bereich mit tag(name, körper, role=\"duenn\") markieren"),
+    "thin_walls:kante": (("Spitze Kanten",), "Spitze Aussenkante (< 90°): mit 45°-Fase stumpf machen"),
+    "thin_walls:detail": (("Oberflächendetails",),
+                          "Oberflächendetail druckt als 1 Linie: Stege ≥ 2 Linien (0,84 mm) oder Teilung grösser"),
+    "bad_bridges": (("Brücken",), "Brücke kürzen, 45°-Fase darunter oder andere Drucklage"),
+    "overhangs": (("Überhang",), "45°-Fase/Rundung darunter oder andere Drucklage"),
 }
+_HINT_BOTTOM = "an der Unterkante: eigene Fase/Kegel an z = 0 entfernen, bottom_chamfer fast dort schon an"
+_HINT_HOLE = ("Decke eines waagrechten Lochs/einer Aussparung: Tropfenform (45°-Spitze nach oben) oder "
+              "Drucklage drehen")
 
 
 def _fmt_range(bb: list[float]) -> str:
     return ", ".join(f"{ax} {bb[i]:.1f}…{bb[i + 3]:.1f}" for i, ax in enumerate("xyz"))
 
 
+def _zone_feature(z: dict, feats: list[dict]) -> dict | None:
+    """Benanntes Feature zur Zone: zuerst das kleinste, das die Zonenmitte enthält, sonst das kleinste
+    überlappende."""
+    bm = z["bbox_model"]
+    c = [(bm[i] + bm[i + 3]) / 2 for i in range(3)]
+    vol = lambda f: float(np.prod([f["bbox_model"][i + 3] - f["bbox_model"][i] + 1e-3 for i in range(3)]))
+    inside = [f for f in feats if all(f["bbox_model"][i] - 0.2 <= c[i] <= f["bbox_model"][i + 3] + 0.2
+                                      for i in range(3))]
+    if inside:
+        return min(inside, key=vol)
+    near = [f for f in feats if all(f["bbox_model"][i] - 0.5 <= bm[i + 3] and bm[i] <= f["bbox_model"][i + 3] + 0.5
+                                    for i in range(3))]
+    return min(near, key=vol) if near else None
+
+
 def zone_summary(diag: dict, print_tris: np.ndarray, failed: list[dict], limit: int = 8) -> list[dict]:
-    """Kurzfassung der Fehlerzonen für den Agenten: Art, Ort (Modellkoordinaten), Fläche, nächstes
-    benanntes Feature und Hinweis – nur für Regeln, die im Bericht tatsächlich anschlagen."""
+    """Kurzfassung der Fehlerzonen für den Agenten – nur für Regeln, die im Bericht anschlagen.
+    Gleichartige Zonen (Art, Klasse, Feature) werden zusammengefasst: Anzahl, Gesamtfläche, dünnste Stelle,
+    Ort der grössten Zone, Feature und ein Hinweis passend zur Ursache."""
     rules = [c["rule"] for c in failed]
     feats = [f for f in diag.get("features", []) if f.get("bbox_model")]
     areas = mc.face_areas(print_tris)
-    zones = []
-    for kind, (rule_part, hint) in _ZONE_KINDS.items():
-        parts = (rule_part,) if isinstance(rule_part, str) else rule_part
-        if any(parts) and not any(x in r for x in parts if x for r in rules):
+    groups: dict[tuple, dict] = {}
+    for key, (rule_parts, hint) in _ZONE_KINDS.items():
+        kind, _, klasse = key.partition(":")
+        if rule_parts and not any(x in r for x in rule_parts for r in rules):
             continue
         for z in diag.get(kind, []):
-            bm = z["bbox_model"]
+            if klasse and z.get("klasse", "wand") != klasse:
+                continue
             area = float(areas[z["tri_indices"]].sum()) if z.get("tri_indices") else 0.0
+            f = _zone_feature(z, feats)
             zh = hint
-            if kind == "overhangs" and z["bbox_print"][2] < 0.6:
-                zh = "an der Unterkante: eigene Fase/Kegel an z = 0 entfernen, bottom_chamfer fast dort schon an"
-            entry = {"art": z["label"], "ort": _fmt_range(bm), "flaeche_mm2": round(area, 1), "hinweis": zh}
-            near = [f for f in feats
-                    if all(f["bbox_model"][i] - 0.5 <= bm[i + 3] and bm[i] <= f["bbox_model"][i + 3] + 0.5
-                           for i in range(3))]
-            if near:
-                vol = lambda f: np.prod([f["bbox_model"][i + 3] - f["bbox_model"][i] + 1e-3 for i in range(3)])
-                entry["feature"] = min(near, key=vol)["name"]
-            zones.append((z.get("severity") != "error", -area, entry))
-    zones.sort(key=lambda t: t[:2])
-    out = [e for *_, e in zones[:limit]]
-    if len(zones) > limit:
-        out.append({"art": f"… {len(zones) - limit} weitere Zonen", "ort": "", "hinweis": "out/diagnostics_3d.json"})
-    return out
+            if kind == "overhangs":
+                if z["bbox_print"][2] < 0.6:
+                    zh = _HINT_BOTTOM
+                elif f and f.get("role") == "cut":
+                    zh = _HINT_HOLE
+            g = groups.setdefault((key, f["name"] if f else None, zh), {
+                "sev": z.get("severity"), "n": 0, "area": 0.0, "big": (0.0, z), "min": None})
+            g["n"] += 1
+            g["area"] += area
+            if area >= g["big"][0]:
+                g["big"] = (area, z)
+            if z.get("min_mm") is not None:
+                g["min"] = z["min_mm"] if g["min"] is None else min(g["min"], z["min_mm"])
+    out = []
+    for (key, feat, hint), g in groups.items():
+        z = g["big"][1]
+        art = z["label"]
+        if g["n"] > 1:
+            art = f"{g['n']} × {art}" if g["min"] is None else f"{g['n']} × {art.split(' (')[0]} (ab {g['min']:.2f} mm)"
+        e = {"art": art, "ort": _fmt_range(z["bbox_model"]) + (" (grösste)" if g["n"] > 1 else ""),
+             "flaeche_mm2": round(g["area"], 1), "hinweis": hint}
+        if feat:
+            e["feature"] = feat
+        out.append((g["sev"] != "error", -g["area"], e))
+    out.sort(key=lambda t: t[:2])
+    res = [e for *_, e in out[:limit]]
+    if len(out) > limit:
+        res.append({"art": f"… {len(out) - limit} weitere Gruppen", "ort": "", "hinweis": "out/diagnostics_3d.json"})
+    return res
 
 
 def _body_colors(d: Path, names: list[str]) -> dict[str, str]:
@@ -389,7 +435,8 @@ def _short(r: dict) -> dict:
         "errors": [f"{e['rule']}: {e['value']} (Soll {e['limit']})" for e in r["errors"]],
         "warnings": [f"{w['rule']}: {w['value']} (Soll {w['limit']})" for w in r["warnings"]],
         "size_mm": r["model"]["size_mm"],
-        "wall_thickness_p1": r["model"].get("wall_thickness", {}).get("p1"),
+        "wall_thickness_p1": (r["model"].get("wall_thickness") or {}).get("p1_wand",
+                                                                       (r["model"].get("wall_thickness") or {}).get("p1")),
         "bed_contact_mm2": r["print"].get("bed_contact_mm2"),
         "bodies": r.get("bodies") or None,
         "zones": r.get("zones") or None,

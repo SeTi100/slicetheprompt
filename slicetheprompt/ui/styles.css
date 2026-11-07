@@ -736,6 +736,11 @@ button {
   border-left-color: var(--red);
 }
 
+.diag-item.info {
+  border-left-color: #888;
+  opacity: 0.8;
+}
+
 .diag-item.warn {
   border-left-color: var(--amber);
 }

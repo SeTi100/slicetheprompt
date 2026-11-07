@@ -7,6 +7,7 @@ Vertrag für model.py:
   * mehrfarbig:  Variable `bodies` = {"name": Körper, …}  – Körper dürfen sich NICHT überschneiden
                  (Einlagen aus dem Grundkörper abziehen). Welche Spule/Farbe je Körper: spec.yaml → filament
   * optional `checks`: dict  Name -> (Ist, Soll, Toleranz)   z. B. {"Loch Ø": (hole_d, 3.45, 0.01)}
+                                    oder (Ist, ">=", Min) / (Ist, "<=", Max), z. B. {"Rand": (rand, ">=", 3)}
 """
 
 from __future__ import annotations
@@ -136,7 +137,17 @@ def main() -> int:
 
         checks = []
         for name, val in (ns.get("checks") or {}).items():
-            ist, soll, tol = (list(val) + [0.01])[:3]
+            val = list(val)
+            if len(val) == 3 and isinstance(val[1], str):          # (Ist, ">=", Min) oder (Ist, "<=", Max)
+                ist, op, grenze = float(val[0]), val[1].strip(), float(val[2])
+                if op not in (">=", "≥", "<=", "≤"):
+                    raise ValueError(f"checks['{name}']: Vergleich '{op}' unbekannt (erlaubt: >=, <=)")
+                ok = ist >= grenze if op in (">=", "≥") else ist <= grenze
+                zeichen = "≥" if op in (">=", "≥") else "≤"
+                checks.append({"name": name, "ist": round(ist, 4), "soll": f"{zeichen} {grenze:g}", "tol": 0.0,
+                               "ok": ok})
+                continue
+            ist, soll, tol = (val + [0.01])[:3]
             checks.append({"name": name, "ist": round(float(ist), 4), "soll": float(soll),
                            "tol": float(tol), "ok": abs(float(ist) - float(soll)) <= float(tol)})
 
