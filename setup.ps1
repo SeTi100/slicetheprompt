@@ -71,4 +71,6 @@ if ($setupOk) {
 Write-Host ""
 Write-Host "Claude Code:    in diesem Ordner 'claude' starten (slicetheprompt wird ueber .mcp.json geladen)" -ForegroundColor White
 Write-Host "Claude Desktop: App beenden, dann 'uv run slicetheprompt install claude-desktop', App starten" -ForegroundColor White
+Write-Host "Codex:          'uv run slicetheprompt install codex', dann Codex neu starten" -ForegroundColor White
+Write-Host "Antigravity:    'uv run slicetheprompt install antigravity', dann MCP Servers -> Refresh" -ForegroundColor White
 Write-Host "Beispiel:       /teil Wandhalter fuer Ladegeraet 68 x 32 x 15 mm, 2 Schraubloecher 4 mm, PETG"

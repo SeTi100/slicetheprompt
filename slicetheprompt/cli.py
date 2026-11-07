@@ -31,13 +31,16 @@ def _cube_stl(path: Path, a: float = 20.0) -> Path:
 
 
 def write_client_configs() -> list[str]:
-    """Clients ausserhalb des Projekts eintragen, die schon installiert sind (Antigravity).
+    """Clients ausserhalb des Projekts eintragen, die schon installiert sind (Codex, Antigravity).
     Claude Code nutzt die versionierte .mcp.json; Claude Desktop: 'slicetheprompt install claude-desktop'."""
     from .clients import install
     done = []
     if (Path.home() / ".gemini" / "config").exists():
         for r in install("antigravity")["results"]:
             done.append(f"Antigravity: {r['file']} ({r['action']})")
+    if (Path.home() / ".codex").exists():
+        for r in install("codex")["results"]:
+            done.append(f"Codex: {r['file']} ({r['action']})")
     return done
 
 
@@ -145,9 +148,9 @@ def main(argv=None) -> int:
 
     sub.add_parser("doctor", help="Drucker, CFS, Slicer und CAD prüfen (richtet den Slicer bei Bedarf ein)")
     s = sub.add_parser("install", help="slicetheprompt in einen KI-Client eintragen")
-    s.add_argument("client", choices=["claude-desktop", "claude-code", "antigravity"])
+    s.add_argument("client", choices=["claude-desktop", "claude-code", "codex", "antigravity"])
     s.add_argument("--force", action="store_true", help="auch wenn die Claude-App läuft")
-    s.add_argument("--config", help="Pfad zur claude_desktop_config.json (Einstellungen → Entwickler zeigt ihn)")
+    s.add_argument("--config", help="Pfad zur Konfigurationsdatei des Clients (Claude Desktop: Einstellungen → Entwickler)")
     sub.add_parser("projects", help="Projekte auflisten")
     s = sub.add_parser("new", help="Projekt anlegen")
     s.add_argument("name")
