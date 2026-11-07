@@ -70,6 +70,25 @@ def test_koerper_in_spec():
     assert not bad.ok and bad.severity == "error"
 
 
+def test_zone_summary_manifold():
+    from slicetheprompt.pipeline import zone_summary
+    t = box(4, 4, 4)
+    diag = {"open_edges": [{"label": "2 offene / nicht-manifolde Kanten", "severity": "error",
+                            "bbox_model": [0, 0, 0, 1, 1, 1], "bbox_print": [0, 0, 0, 1, 1, 1], "tri_indices": [0]}],
+            "features": []}
+    failed = [{"rule": "manifold (keine Kante an >2 Flächen)"}]
+    z = zone_summary(diag, t, failed)
+    assert len(z) == 1 and "manifold" in z[0]["hinweis"]
+    assert zone_summary(diag, t, []) == []                 # ohne fehlgeschlagene Regel keine Zone
+
+
+def test_worker_reports_errors_as_result():
+    from slicetheprompt.mcp_server import _worker, code_stand
+    r = _worker("check", "gibt-es-nicht-xyz")
+    assert r["ok"] is False and "nicht gefunden" in r["error"]
+    assert {"server_gestartet", "veraltet"} <= set(code_stand())
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

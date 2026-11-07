@@ -6,9 +6,15 @@ Wichtig: Dieser Prozess darf nichts auf stdout schreiben (das ist der MCP-Kanal)
 from __future__ import annotations
 
 import contextlib
+import datetime as dt
+import hashlib
 import io
+import json
+import os
+import subprocess
 import sys
 import traceback
+from pathlib import Path
 
 try:  # mcp 1.x
     from mcp.server.fastmcp import FastMCP as _Server
@@ -29,6 +35,44 @@ Regeln und Toleranzen: config/printer.yaml (und calibration.yaml). Nie ohne ausd
 
 server = _Server("slicetheprompt", instructions=INSTRUCTIONS)
 
+ROOT = Path(__file__).resolve().parents[1]
+WORKER_TIMEOUT_S = 840          # unter dem MCP-Timeout von 900 s in .mcp.json
+
+
+def _code_fingerprint() -> str:
+    """Kennung des Codes im Checkout (Grösse + Änderungszeit aller .py in slicetheprompt/ und lib/)."""
+    h = hashlib.sha1()
+    for p in sorted([*(ROOT / "slicetheprompt").glob("*.py"), *(ROOT / "lib").glob("*.py")]):
+        st = p.stat()
+        h.update(f"{p.name}:{st.st_size}:{st.st_mtime_ns};".encode())
+    return h.hexdigest()[:12]
+
+
+def _git_head() -> str | None:
+    try:
+        r = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT, capture_output=True, text=True,
+                           timeout=5)
+        return r.stdout.strip() or None
+    except Exception:
+        return None
+
+
+_STARTED = dt.datetime.now().isoformat(timespec="seconds")
+_START_CODE = _code_fingerprint()
+_START_GIT = _git_head()
+
+
+def code_stand() -> dict:
+    """Ist der laufende Server älter als der Code im Checkout?"""
+    now = _code_fingerprint()
+    st = {"server_gestartet": _STARTED, "git_beim_start": _START_GIT, "git_jetzt": _git_head(),
+          "veraltet": now != _START_CODE}
+    if st["veraltet"]:
+        st["hinweis"] = ("Code wurde nach dem Serverstart geändert. Bauen/Prüfen/Rendern laufen schon mit dem neuen "
+                         "Code (eigener Prozess); für geänderte MCP-Tools den Server neu verbinden "
+                         "(Claude Code: /mcp → slicetheprompt → reconnect).")
+    return st
+
 
 def _safe(fn, *a, **k) -> dict:
     """Fehler als Ergebnis zurückgeben statt den Server zu stören; stdout abfangen."""
@@ -42,6 +86,25 @@ def _safe(fn, *a, **k) -> dict:
     except Exception as exc:
         return {"ok": False, "error": f"{type(exc).__name__}: {exc}",
                 "trace": traceback.format_exc(limit=4)[-1500:], "stdout": buf.getvalue()[-500:]}
+
+
+def _worker(name: str, *args) -> dict:
+    """Pipeline-Schritt in eigenem Prozess (parallel zu anderen Sessions, immer aktueller Code)."""
+    try:
+        proc = subprocess.run([sys.executable, "-m", "slicetheprompt._worker", name, json.dumps(list(args))],
+                              cwd=ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                              timeout=WORKER_TIMEOUT_S, env={**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"})
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "error": f"{name} nach {WORKER_TIMEOUT_S} s abgebrochen",
+                "hinweis": "Ergebnis ggf. in out/report.json; per CLI wiederholen: uv run slicetheprompt run <projekt>"}
+    try:
+        res = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        return {"ok": False, "error": f"{name}: keine gültige Antwort (Exit {proc.returncode})",
+                "stderr": proc.stderr[-2000:], "stdout": proc.stdout[-500:]}
+    if isinstance(res, dict) and code_stand()["veraltet"]:
+        res["server_veraltet"] = code_stand()["hinweis"]
+    return res
 
 
 @server.tool()
@@ -63,7 +126,7 @@ def build_and_check(project: str, orientation: str = "wie modelliert") -> dict:
     printer.yaml und spec.yaml prüfen und out/render.png erzeugen.
     orientation: 'wie modelliert' (Standard), 'auto' oder 'kopfüber (X 180°)', 'X +90°', 'X -90°', 'Y +90°', 'Y -90°'.
     Danach IMMER das PNG mit dem Read-Tool ansehen."""
-    return _safe(pipeline.run_all, project, orientation)
+    return _worker("run_all", project, orientation)
 
 
 @server.tool()
@@ -73,19 +136,19 @@ def stencil(project: str, z: list[float] | None = None, height: float = 2.0) -> 
     ab den Höhen `z` (mm im Original, Standard [0] = Unterseite) und legt sie aufs Bett – Löcher,
     Stifte und Aussenmasse in XY bleiben exakt wie im Original. z dort wählen, wo die Passungen liegen
     (Hinweise in `features_z`). Baut, prüft und rendert sofort; danach PNG ansehen und normal slicen."""
-    return _safe(pipeline.new_stencil, project, z or [0.0], height)
+    return _worker("new_stencil", project, z or [0.0], height)
 
 
 @server.tool()
 def check_report(project: str) -> dict:
     """Vollständigen Prüfbericht (alle Regeln, Wandstärken, Brücken, Bettkontakt) zurückgeben."""
-    return _safe(pipeline.check, project)
+    return _worker("check", project)
 
 
 @server.tool()
 def render_views(project: str, which: str = "print") -> dict:
     """4-Ansichten-PNG erzeugen. which: 'print' (Drucklage) oder 'model'. Pfad mit Read ansehen."""
-    return _safe(pipeline.render, project, which)
+    return _worker("render", project, which)
 
 
 @server.tool()
@@ -205,6 +268,7 @@ def get_config() -> dict:
         s = c.get("slicer", {})
         c["slicer"] = {k: s.get(k) for k in ("kind", "exe", "machine", "process", "filament")}
         c["bausteine"] = lib_reference()
+        c["code_stand"] = code_stand()
         return c
     return _safe(_c)
 
@@ -238,8 +302,7 @@ def version_list(project: str) -> dict:
 @server.tool()
 def version_restore(project: str, version: str) -> dict:
     """Stellt eine ältere Projektversion (`v001`, `v002`, ...) wieder her und führt Build + Prüfung aus."""
-    from . import history
-    return _safe(history.restore_version, project, version)
+    return _worker("restore_version", project, version)
 
 
 def main() -> None:
