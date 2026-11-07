@@ -13,6 +13,85 @@ Die ganze Druck-Logik steckt im MCP-Server `slicetheprompt` (Python). Jeder Agen
 kann ihn nutzen. Die Anbieter unterscheiden sich nur darin, wo der Server eingetragen wird und wie
 Regeln und Befehle heissen.
 
+<p align="center">
+  <img src="docs/images/01-studio-uebersicht.webp" alt="SliceThePrompt Studio mit der Zwischenstufe 12 Z → 48 Z eines Teleskop-Antriebs" width="100%">
+  <br><sub><b>SliceThePrompt Studio</b>: das vom Agenten gebaute Teil in 3D, mit Prüfergebnis, Versionen und CFS-Spulen. Beispiel: Zahnrad-Zwischenstufe 12 Z → 48 Z für einen Teleskop-Antrieb.</sub>
+</p>
+
+## SliceThePrompt Studio – sehen, markieren, zurück an den Agenten
+
+Der Agent baut das Teil, Studio zeigt es dir. Statt im Chat „die Nabe da links, etwas höher“ zu
+beschreiben, klickst du direkt aufs 3D-Modell. Der Agent liest deine Markierungen samt
+Koordinaten, Feature-Namen und Screenshot über das MCP-Werkzeug `get_ui_feedback`.
+
+```powershell
+.\start-studio.bat                        # oder: uv run slicetheprompt ui
+# → http://127.0.0.1:8765  (direkt ein Projekt: …/?project=2026-11-04-zwischenstufe-teleskop)
+```
+
+Studio aktualisiert sich live, sobald der Agent neu baut, und **druckt nie selbst**: Druckstart nur im
+Chat nach deinem „drucken“.
+
+### Prüfen
+
+| | |
+| --- | --- |
+| <img src="docs/images/02-fehlerzonen-fokus.webp" alt="Fokus auf einen Überhang im Madenschrauben-Loch"> | **Fehler-Zonen mit Fokus.** Dünne Wände (rot), Überhänge und zu lange Brücken (orange), schwebende Teile und verfehlte Schnitte werden dreiecksgenau eingefärbt. Ein Klick auf „⌖ Fokus“ fliegt zur Stelle, hier ein kleiner Überhang oben im Madenschrauben-Loch. |
+| <img src="docs/images/05-schnitt.webp" alt="Schnitt in Y durch Rad und Ritzel"> | **Schnittebene X/Y/Z.** Mit dem Schieberegler durchs Teil fahren: Nabe, D-Bohrung und Tasche des 48-Z-Rads werden im Querschnitt sichtbar. |
+| <img src="docs/images/04-messen.webp" alt="Messband von der Nabe zum Druckbett"> | **Messen.** Zwei Klicks, Abstand plus ΔX/ΔY/ΔZ in mm. Hier: Nabe oben bis Druckbett, ΔZ = 23,00 mm wie in der Spezifikation. Die Statusleiste zeigt laufend die Koordinate unter dem Mauszeiger und das CAD-Feature (`[rad48_tasche]`). |
+| <img src="docs/images/08-checks-spec.webp" alt="Tab Checks und Spec"> | **Checks & Spec.** Alle Funktionsmasse aus `model.py` (Ist, Soll, Toleranz) und die Druckregeln aus `config/printer.yaml` auf einen Blick, daneben `spec.yaml`, die 2D-Kontrollansicht und der Quellcode. |
+
+### Ändern
+
+| | |
+| --- | --- |
+| <img src="docs/images/03-markieren.webp" alt="Pin, Bereichsbox und Verschiebepfeil mit Anweisungen"> | **3D-Markierungen für den Agenten.** 📍 Pin auf eine Fläche, ⬚ Bereichsbox um eine Zone, ➔ Von→Nach-Pfeil für Verschiebungen. Zu jeder Markierung eine kurze Anweisung, dazu ein Gesamthinweis. „Markierung speichern & Agent-Prompt kopieren“ legt `ui_feedback.json` samt Screenshot ab und kopiert den passenden Satz für den Chat. |
+| <img src="docs/images/07-parameter.webp" alt="Tab Parameter mit den Zahlen aus model.py"> | **Parameter ohne KI.** Alle benannten Masse oben in `model.py` als Formular. Zahl ändern, „Sofort neu bauen“: Studio schreibt den Wert per AST in `model.py`, baut, prüft und legt eine neue Version an. Für kleine Korrekturen braucht es keinen Agenten. |
+| <img src="docs/images/06-code-diff.webp" alt="Code-Diff zwischen v001 und v002"> | **Versionen und Code-Diff.** Jeder Build wird eine Version (`history/v001`, `v002`, …) mit STL, Bericht und Parametern. „⇄ Code-Diff“ zeigt, was sich in `model.py` geändert hat (hier PETG → PLA), „↶ Rollback“ holt eine alte Version zurück. |
+
+### Schablone: erst die Passung, dann das Teil
+
+Bevor 23 mm Zahnrad gedruckt werden, lohnt ein Test, ob Welle und Zähne passen. `/schablone`
+(Codex: `$schablone`) schneidet dünne Scheiben aus dem Teil, mit exakt denselben XY-Massen und
+Toleranzen:
+
+```
+/schablone zwischenstufe bei z 0 und 16     →  4 Scheiben à 2 mm · 33 min · 16,4 g PLA
+```
+
+| | |
+| --- | --- |
+| <img src="docs/images/09-schablone.webp" alt="Schablone mit vier Scheiben auf dem Druckbett"> | **z = 0:** Zahnprofil von Rad und Ritzel mit D-Bohrung, um den Eingriff zu prüfen. **z = 16:** beide Naben Ø 16 mit D-Bohrung, um zu prüfen, ob die 5-mm-Welle sitzt. Die Scheiben liegen nebeneinander auf dem Bett. |
+| <img src="docs/images/10-schablone-ghost.webp" alt="Ghost-Vergleich zweier Schablonen-Versionen"> | **👻 Ghost.** Eine ältere Version halbtransparent über die aktuelle legen. Hier v001 (nur z = 0, orange) über v002 (z = 0 und 16, blau): sofort sichtbar, was dazugekommen ist und wie sich die Anordnung verschoben hat. |
+
+### Der Kreislauf
+
+```
+Prompt → Agent baut (build_and_check) → Studio zeigt Teil + Fehler-Zonen
+       → du markierst in 3D → get_ui_feedback → Agent baut v00n+1 → clear_ui_feedback
+       → /schablone (optional) → /drucken → „drucken“
+```
+
+## So sieht das im Agenten aus
+
+Drei Beispiel-Sitzungen mit derselben Zwischenstufe, eine je Agent. Die Bilder sind
+nachgestellt; Masse, Prüfergebnisse und Slice-Werte stammen aus dem echten Projekt.
+
+<p align="center">
+  <img src="docs/images/agent-claude-code.webp" alt="Claude Code: /teil erzeugt die Zwischenstufe" width="100%">
+  <br><sub><b>Claude Code</b> · <code>/teil</code> konstruiert die Zwischenstufe: Konfiguration lesen, Projekt anlegen, CAD schreiben, prüfen, Render ansehen, Funktionsmasse melden.</sub>
+</p>
+
+<p align="center">
+  <img src="docs/images/agent-codex.webp" alt="Codex: $schablone erzeugt und slicet den Passungs-Testdruck" width="100%">
+  <br><sub><b>Codex</b> · <code>$schablone</code> schneidet den Passungs-Test, prüft das CFS und slicet. Gedruckt wird erst nach „drucken“.</sub>
+</p>
+
+<p align="center">
+  <img src="docs/images/agent-antigravity.webp" alt="Antigravity: setzt die Markierungen aus Studio im Code um" width="100%">
+  <br><sub><b>Antigravity</b> · liest die drei Markierungen aus Studio (<code>get_ui_feedback</code>), ändert die Parameter in <code>model.py</code>, baut v003 und räumt das Feedback ab.</sub>
+</p>
+
 ## Unterstützte Agenten
 
 | Agent | Regeln | Befehle / Skills | MCP-Eintrag | Getestet |
@@ -219,6 +298,8 @@ slicetheprompt liest das CFS über Moonraker: Platz (T1A–T4D), Material, Farbe
 | `config/slicer.yaml`, `config/slicer/` | gewählte Creality-Print-Profile (vom Setup erzeugt) |
 | `lib/parts.py` | CAD-Bausteine mit Toleranzen: `screw_hole_cut`, `fit`, `nut_trap_cut`, … |
 | `slicetheprompt/` | Prüfung, Render, Slicen, CFS, Drucker (MCP-Server und CLI) |
+| `slicetheprompt/ui/`, `start-studio.bat` | SliceThePrompt Studio (lokale Web-Oberfläche, three.js) |
+| `docs/images/` | Screenshots für diese README |
 | `.claude/` | Befehle `/teil`, `/drucken`, `/status`, `/kalibrieren`, `/schablone` (`/stencil`) und Freigaberegeln für Claude Code |
 | `.agents/skills/` | dieselben Abläufe als Skills für Codex und Antigravity |
 | `.mcp.json` | startet slicetheprompt für Claude Code über `uv` (ohne absolute Pfade) |
@@ -227,7 +308,7 @@ slicetheprompt liest das CFS über Moonraker: Platz (T1A–T4D), Material, Farbe
 ## Ohne KI-Agent (Kommandozeile)
 
 ```powershell
-uv run slicetheprompt ui                       # SliceThePrompt (3D-Viewer, Fehler-Overlays, Versionen & Markierung)
+uv run slicetheprompt ui                       # SliceThePrompt Studio (3D, Fehler-Zonen, Markieren, Versionen)
 uv run slicetheprompt new halter --material petg
 uv run slicetheprompt run <projekt>            # bauen, prüfen, rendern
 uv run slicetheprompt schablone <projekt> --z 0 12 --hoehe 2   # Passungs-Testdruck (Alias: stencil)
