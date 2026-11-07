@@ -2,7 +2,7 @@
 description: Dünnen Passungs-Testdruck (Schablone) aus einem Teil erzeugen, um Löcher und Passungen günstig zu prüfen
 argument-hint: <projekt> [Höhe/Bereich der Passung, Dicke]
 ---
-Erzeuge eine Schablone (dünner Passungs-Testdruck) nach CLAUDE.md, Abschnitt „Schablone“:
+Erzeuge eine Schablone (dünner Passungs-Testdruck) nach AGENTS.md, Abschnitt „Schablone“:
 
 Auftrag: $ARGUMENTS
 

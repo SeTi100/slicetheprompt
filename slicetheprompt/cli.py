@@ -151,6 +151,7 @@ def main(argv=None) -> int:
     s.add_argument("client", choices=["claude-desktop", "claude-code", "codex", "antigravity"])
     s.add_argument("--force", action="store_true", help="auch wenn die Claude-App läuft")
     s.add_argument("--config", help="Pfad zur Konfigurationsdatei des Clients (Claude Desktop: Einstellungen → Entwickler)")
+    sub.add_parser("config", help="Regeln, Toleranzen und CAD-Bausteine (wie get_config)")
     sub.add_parser("projects", help="Projekte auflisten")
     s = sub.add_parser("new", help="Projekt anlegen")
     s.add_argument("name")
@@ -229,6 +230,12 @@ def main(argv=None) -> int:
         elif a.cmd == "install":
             from .clients import install
             _out(install(a.client, a.force, a.config))
+        elif a.cmd == "config":
+            from .config import load_config
+            from .libref import lib_reference
+            c = load_config()
+            c.pop("slicer", None)
+            _out({**c, "bausteine": lib_reference()})
         elif a.cmd == "projects":
             _out(pipeline.list_projects())
         elif a.cmd == "new":

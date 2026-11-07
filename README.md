@@ -96,7 +96,7 @@ nachgestellt; Masse, Prüfergebnisse und Slice-Werte stammen aus dem echten Proj
 
 | Agent | Regeln | Befehle / Skills | MCP-Eintrag | Getestet |
 | --- | --- | --- | --- | --- |
-| **Claude Code** (CLI, Desktop-App „Code“, IDE) | `CLAUDE.md` | `.claude/commands/` → `/teil`, `/drucken` … | `.mcp.json` im Projekt (versioniert) | ja |
+| **Claude Code** (CLI, Desktop-App „Code“, IDE) | `CLAUDE.md` → `AGENTS.md` | `.claude/commands/` → `/teil`, `/drucken` … | `.mcp.json` im Projekt (versioniert) | ja |
 | **Codex** (CLI, App, IDE) | `AGENTS.md` | `.agents/skills/` → `$teil`, `$drucken` … | `~/.codex/config.toml` | Konfiguration ja, Betrieb noch offen |
 | **Antigravity** | `AGENTS.md` | `.agents/skills/` | `~/.gemini/config/mcp_config.json` | ja |
 | **Claude Desktop** (Chat) | Anweisungen des Servers | – | `claude_desktop_config.json` | ja |
@@ -291,8 +291,8 @@ slicetheprompt liest das CFS über Moonraker: Platz (T1A–T4D), Material, Farbe
 
 | Pfad | Inhalt |
 | --- | --- |
-| `CLAUDE.md` | Arbeitsregeln für Claude Code |
-| `AGENTS.md` | dieselben Regeln für Codex, Antigravity und andere Agenten |
+| `AGENTS.md` | Arbeitsregeln für alle Agenten (Claude Code, Codex, Antigravity, …) |
+| `CLAUDE.md` | bindet `AGENTS.md` ein, dazu Claude-spezifische Hinweise |
 | `config/printer.yaml` | Drucker-IP, Bauraum, Geometrie-Regeln, Toleranzen, Temperaturgrenzen |
 | `config/calibration.yaml` | gemessene Toleranzen (nach `/kalibrieren`) |
 | `config/slicer.yaml`, `config/slicer/` | gewählte Creality-Print-Profile (vom Setup erzeugt) |

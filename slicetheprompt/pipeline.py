@@ -29,6 +29,7 @@ beschreibung: "{beschreibung}"
 material: {material}        # pla | petg
 qualitaet: standard         # fein (0.12) | standard (0.20) | grob (0.28)
 menge: 1
+koerper: null               # getrennte Teile in einem Druck (z. B. 3 Testringe); leer = ein zusammenhängender Körper
 # Filament/Spule: leer = passende Spule automatisch (meiste Restmenge).
 #   einfarbig:  filament: T1C        oder  filament: schwarz   oder  filament: "#FF0000"
 #   mehrfarbig: filament: {{grundkoerper: weiss, schrift: T1D}}   (Schlüssel = Namen in bodies)
@@ -275,7 +276,55 @@ def check(project: str) -> dict:
     diag = mc.diagnostics_3d(print_tris, cfg, build_data=bi, print_info=po)
     (out / "diagnostics_3d.json").write_text(json.dumps(diag, indent=2, ensure_ascii=False, default=float),
                                              encoding="utf-8")
+    report["zones"] = zone_summary(diag, print_tris, errors + warnings)
+    (out / "report.json").write_text(json.dumps(report, indent=2, ensure_ascii=False, default=float),
+                                     encoding="utf-8")
     return report
+
+
+# Fehlerzone (diagnostics_3d) → zugehörige Prüfregel (Teilstring) und Hinweis zur Behebung
+_ZONE_KINDS = {
+    "open_edges": ("wasserdicht", "Netz offen – meist sich nur berührende Körper; überlappen lassen oder Abstand"),
+    "floating_parts": ("", "Körper ohne Bettkontakt – absenken oder mit dem Rest verbinden"),
+    "thin_walls": ("Mindestwandstärke", "Wand verstärken oder Detail weglassen"),
+    "bad_bridges": ("Brücken", "Brücke kürzen, 45°-Fase darunter oder andere Drucklage"),
+    "overhangs": ("Überhang", "45°-Fase/Rundung darunter oder andere Drucklage"),
+}
+
+
+def _fmt_range(bb: list[float]) -> str:
+    return ", ".join(f"{ax} {bb[i]:.1f}…{bb[i + 3]:.1f}" for i, ax in enumerate("xyz"))
+
+
+def zone_summary(diag: dict, print_tris: np.ndarray, failed: list[dict], limit: int = 8) -> list[dict]:
+    """Kurzfassung der Fehlerzonen für den Agenten: Art, Ort (Modellkoordinaten), Fläche, nächstes
+    benanntes Feature und Hinweis – nur für Regeln, die im Bericht tatsächlich anschlagen."""
+    rules = [c["rule"] for c in failed]
+    feats = [f for f in diag.get("features", []) if f.get("bbox_model")]
+    areas = mc.face_areas(print_tris)
+    zones = []
+    for kind, (rule_part, hint) in _ZONE_KINDS.items():
+        if rule_part and not any(rule_part in r for r in rules):
+            continue
+        for z in diag.get(kind, []):
+            bm = z["bbox_model"]
+            area = float(areas[z["tri_indices"]].sum()) if z.get("tri_indices") else 0.0
+            zh = hint
+            if kind == "overhangs" and z["bbox_print"][2] < 0.6:
+                zh = "an der Unterkante: eigene Fase/Kegel an z = 0 entfernen, bottom_chamfer fast dort schon an"
+            entry = {"art": z["label"], "ort": _fmt_range(bm), "flaeche_mm2": round(area, 1), "hinweis": zh}
+            near = [f for f in feats
+                    if all(f["bbox_model"][i] - 0.5 <= bm[i + 3] and bm[i] <= f["bbox_model"][i + 3] + 0.5
+                           for i in range(3))]
+            if near:
+                vol = lambda f: np.prod([f["bbox_model"][i + 3] - f["bbox_model"][i] + 1e-3 for i in range(3)])
+                entry["feature"] = min(near, key=vol)["name"]
+            zones.append((z.get("severity") != "error", -area, entry))
+    zones.sort(key=lambda t: t[:2])
+    out = [e for *_, e in zones[:limit]]
+    if len(zones) > limit:
+        out.append({"art": f"… {len(zones) - limit} weitere Zonen", "ort": "", "hinweis": "out/diagnostics_3d.json"})
+    return out
 
 
 def _body_colors(d: Path, names: list[str]) -> dict[str, str]:
@@ -338,6 +387,7 @@ def _short(r: dict) -> dict:
         "wall_thickness_p1": r["model"].get("wall_thickness", {}).get("p1"),
         "bed_contact_mm2": r["print"].get("bed_contact_mm2"),
         "bodies": r.get("bodies") or None,
+        "zones": r.get("zones") or None,
     }
 
 
