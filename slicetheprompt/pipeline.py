@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import os
 import re
 import subprocess
 import sys
@@ -144,6 +145,7 @@ def build(project: str, timeout: int = 180) -> dict:
             [sys.executable, "-m", "slicetheprompt._cad_runner", str(d / "model.py"), str(out)],
             capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout,
             cwd=str(Path(__file__).resolve().parents[1]),
+            env={**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"},
         )
     except subprocess.TimeoutExpired:
         return {"ok": False, "error": f"Build nach {timeout} s abgebrochen (Geometrie zu komplex?)"}
@@ -284,7 +286,9 @@ def check(project: str) -> dict:
 
 # Fehlerzone (diagnostics_3d) → zugehörige Prüfregel (Teilstring) und Hinweis zur Behebung
 _ZONE_KINDS = {
-    "open_edges": ("wasserdicht", "Netz offen – meist sich nur berührende Körper; überlappen lassen oder Abstand"),
+    "open_edges": (("wasserdicht", "manifold", "Normalen"),
+                   "Netz offen/nicht-manifold – meist sich nur berührende Körper oder Naht eines Sweeps; überlappen "
+                   "lassen, Abstand geben oder Anfangswinkel drehen"),
     "floating_parts": ("", "Körper ohne Bettkontakt – absenken oder mit dem Rest verbinden"),
     "thin_walls": ("Mindestwandstärke", "Wand verstärken oder Detail weglassen"),
     "bad_bridges": ("Brücken", "Brücke kürzen, 45°-Fase darunter oder andere Drucklage"),
@@ -304,7 +308,8 @@ def zone_summary(diag: dict, print_tris: np.ndarray, failed: list[dict], limit: 
     areas = mc.face_areas(print_tris)
     zones = []
     for kind, (rule_part, hint) in _ZONE_KINDS.items():
-        if rule_part and not any(rule_part in r for r in rules):
+        parts = (rule_part,) if isinstance(rule_part, str) else rule_part
+        if any(parts) and not any(x in r for x in parts if x for r in rules):
             continue
         for z in diag.get(kind, []):
             bm = z["bbox_model"]
@@ -368,8 +373,8 @@ def run_all(project: str, orientation: str | None = None, reason: str = "build_a
     if not b.get("ok"):
         return {"stage": "build", **b}
     p = prepare(project, orientation or "wie modelliert")
+    img = render(project)          # vor der Prüfung: Bild gibt es auch, wenn die Prüfung abbricht
     r = check(project)
-    img = render(project)
     from . import history
     snap = history.save_snapshot(project, reason=reason)
     return {"stage": "done",

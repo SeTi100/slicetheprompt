@@ -562,7 +562,8 @@ def diagnostics_3d(print_tris: np.ndarray, cfg: dict, build_data: dict | None = 
     centers = print_tris.mean(axis=1)
     d = -normals
     origins = centers + d * 1e-4
-    dist = _ray_hits_local(origins, d, print_tris, maxlen=8.0)
+    # Nur „dünner als min_wall?“ zählt: Suche auf diese Reichweite begrenzen (gleiches Ergebnis, ~100× schneller)
+    dist = _ray_hits_local(origins, d, print_tris, maxlen=thin_threshold + 0.05, cell=2.0)
     thin_mask = (dist < thin_threshold) & valid_tri_mask
 
     if faces is not None and thin_mask.any():
