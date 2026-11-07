@@ -33,7 +33,7 @@ def read_stl(path: str | Path) -> np.ndarray:
     return np.asarray(verts, dtype=np.float64).reshape(-1, 3, 3)
 
 
-def write_stl(path: str | Path, tris: np.ndarray, header: str = "printlab") -> None:
+def write_stl(path: str | Path, tris: np.ndarray, header: str = "slicetheprompt") -> None:
     tris = np.asarray(tris, dtype=np.float64)
     normals = face_normals(tris)
     rec = np.dtype([("normal", "<f4", 3), ("v", "<f4", (3, 3)), ("attr", "<u2")])

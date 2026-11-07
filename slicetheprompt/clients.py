@@ -1,6 +1,6 @@
-"""printlab in KI-Clients eintragen:  uv run printlab install claude-desktop | antigravity
+"""slicetheprompt in KI-Clients eintragen:  uv run slicetheprompt install claude-desktop | antigravity
 
-Claude Code braucht nichts: die versionierte .mcp.json im Projekt startet printlab über uv.
+Claude Code braucht nichts: die versionierte .mcp.json im Projekt startet slicetheprompt über uv.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ def server_entry() -> dict:
     """Eintrag mit absolutem Pfad zur Projekt-Python (für Clients ohne Projektbezug)."""
     return {
         "command": sys.executable,
-        "args": ["-m", "printlab.mcp_server"],
+        "args": ["-m", "slicetheprompt.mcp_server"],
         "env": {"PYTHONPATH": str(ROOT), "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"},
     }
 
@@ -73,8 +73,9 @@ def _merge(path: Path, name: str, entry: dict) -> dict:
         shutil.copy2(path, backup)
     else:
         backup = None
-    before = (data.get("mcpServers") or {}).get(name)
-    data.setdefault("mcpServers", {})[name] = entry
+    servers = data.setdefault("mcpServers", {})
+    before = servers.get(name) or servers.pop("printlab", None)  # alter Name vor der Umbenennung
+    servers[name] = entry
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
     return {"file": str(path), "backup": str(backup) if backup else None,
@@ -93,13 +94,13 @@ def install(client: str, force: bool = False, config: str | None = None) -> dict
                 "Die Claude-Desktop-App läuft. Sie überschreibt ihre Konfiguration beim Beenden – "
                 "bitte die App ganz beenden (Infobereich → Beenden) und den Befehl wiederholen.")
         targets = [Path(config)] if config else _claude_desktop_configs()
-        res = [_merge(p, "printlab", entry) for p in targets]
+        res = [_merge(p, "slicetheprompt", entry) for p in targets]
         return {"client": client, "results": res, "next": "Claude-Desktop-App starten"}
     if client == "antigravity":
         p = Path.home() / ".gemini" / "config" / "mcp_config.json"
-        return {"client": client, "results": [_merge(p, "printlab", entry)]}
+        return {"client": client, "results": [_merge(p, "slicetheprompt", entry)]}
     if client == "claude-code":
         return {"client": client, "results": [],
                 "next": "Nichts zu tun: die .mcp.json im Projekt wird von Claude Code automatisch geladen "
-                        "(beim ersten Start 'printlab' zulassen)."}
+                        "(beim ersten Start 'slicetheprompt' zulassen)."}
     raise ValueError("client muss claude-desktop, claude-code oder antigravity sein")

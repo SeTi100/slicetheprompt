@@ -26,17 +26,17 @@ Das Setup installiert `uv` (eigenständig, nicht nur aus conda, damit die Claude
 Python 3.12 und alle Pakete, installiert Creality Print per winget, falls es fehlt, löst die Profile
 für „Creality Hi 0.4“ auf (PLA/PETG, 0,12/0,20/0,28 mm), testet Drucker und CFS, slicet zur Probe
 ein- und zweifarbig und baut die Beispiele. Danach `claude` im Ordner starten, den Ordner als
-vertrauenswürdig bestätigen und den MCP-Server „printlab“ zulassen (`/mcp` zeigt den Status).
+vertrauenswürdig bestätigen und den MCP-Server „slicetheprompt“ zulassen (`/mcp` zeigt den Status).
 
-- Ohne Setup geht es auch: Claude Code startet printlab über die `.mcp.json` mit `uv`, und der
+- Ohne Setup geht es auch: Claude Code startet slicetheprompt über die `.mcp.json` mit `uv`, und der
   Slicer richtet sich beim ersten Slicen selbst ein. Der erste Start dauert dann einige Minuten.
-- **Claude-Desktop-App** statt Claude Code: App ganz beenden, `uv run printlab install claude-desktop`,
-  App starten. Der Befehl trägt printlab mit absolutem Pfad ein und legt eine Sicherung an.
-- printlab in Claude Code „failed to connect“? Meist liegt `uv` nur in einer conda-Umgebung:
+- **Claude-Desktop-App** statt Claude Code: App ganz beenden, `uv run slicetheprompt install claude-desktop`,
+  App starten. Der Befehl trägt slicetheprompt mit absolutem Pfad ein und legt eine Sicherung an.
+- slicetheprompt in Claude Code „failed to connect“? Meist liegt `uv` nur in einer conda-Umgebung:
   `.\setup.ps1` erneut ausführen (installiert ein eigenes `uv`), dann die App neu starten.
 - Creality Print wird nicht gefunden? `.\setup.ps1 -Exe "C:\…\CrealityPrint.exe"`
 - Test-Slice liefert keinen G-Code? **Creality Print schliessen** und erneut ausführen.
-- Zustand prüfen: `uv run printlab doctor` (oder im Chat: „doctor“).
+- Zustand prüfen: `uv run slicetheprompt doctor` (oder im Chat: „doctor“).
 
 **Ältere Klone aktualisieren** (vor dem 4.11.2026 18:30 eingerichtet): `.mcp.json` und `.claude\` waren
 damals erzeugte Dateien und sind jetzt versioniert. Einmalig:
@@ -54,6 +54,7 @@ git pull
 | `/drucken schwarz` oder `/drucken T1C` | mit genau dieser Spule (Farbe oder CFS-Platz) |
 | `/status` | Fortschritt, Temperaturen, Restzeit |
 | `/kalibrieren pla` | Toleranz-Testteil drucken, messen, Werte übernehmen |
+| `/schablone halter` oder `/stencil halter` | dünne Scheibe (2 mm) aus dem Teil als schneller Passungs-Testdruck; z. B. `/schablone halter bei z 0 und 12` |
 | freier Text | z. B. „Mach den Halter 5 mm höher und druck ihn nochmal“ |
 | `/teil Namensschild 60 × 25 mm, weiss mit schwarzer Schrift „TIM“` | zweifarbig über das CFS |
 
@@ -62,18 +63,18 @@ Vor jedem Druckstart fragt Claude Code zusätzlich per Bestätigungsdialog (Rege
 
 ## Filament, CFS und Mehrfarbdruck
 
-printlab liest das CFS über Moonraker: Platz (T1A–T4D), Material, Farbe, Restmenge und RFID-Code.
+slicetheprompt liest das CFS über Moonraker: Platz (T1A–T4D), Material, Farbe, Restmenge und RFID-Code.
 Über den Code wird das passende Creality-Print-Profil gewählt (z. B. 101001 → *Hyper PLA*).
 
 - **Spule wählen** in `spec.yaml` oder beim Drucken: `filament: T1C`, `filament: schwarz` oder
-  `filament: "#FF0000"`. Ohne Angabe nimmt printlab die Spule des Materials mit der grössten Restmenge.
+  `filament: "#FF0000"`. Ohne Angabe nimmt slicetheprompt die Spule des Materials mit der grössten Restmenge.
 - **Exaktes Profil** (z. B. ein Matt-PLA): `filament_profile: "CR-PLA Matte @Creality Hi 0.4 nozzle"`;
-  alle Profile: `uv run printlab filaments --type PLA`.
+  alle Profile: `uv run slicetheprompt filaments --type PLA`.
 - **Mehrfarbig:** in `model.py` `bodies = {"platte": …, "schrift": …}` statt `part` und in `spec.yaml`
-  `filament: {platte: weiss, schrift: schwarz}`. printlab baut daraus eine 3MF mit einem Filament je
+  `filament: {platte: weiss, schrift: schwarz}`. slicetheprompt baut daraus eine 3MF mit einem Filament je
   Körper, slicet sie und prüft im G-Code, dass genau diese Spulen verwendet werden.
 - Beim Druckstart wird erneut geprüft, ob dieselben Spulen noch auf denselben Plätzen liegen.
-- Anzeigen: `uv run printlab cfs`, Zuordnung ohne Slicen: `uv run printlab plan <projekt>`.
+- Anzeigen: `uv run slicetheprompt cfs`, Zuordnung ohne Slicen: `uv run slicetheprompt plan <projekt>`.
 
 ## Ordner
 
@@ -84,20 +85,21 @@ printlab liest das CFS über Moonraker: Platz (T1A–T4D), Material, Farbe, Rest
 | `config/calibration.yaml` | gemessene Toleranzen (nach `/kalibrieren`) |
 | `config/slicer.yaml`, `config/slicer/` | gewählte Creality-Print-Profile (vom Setup erzeugt) |
 | `lib/parts.py` | CAD-Bausteine mit Toleranzen: `screw_hole_cut`, `fit`, `nut_trap_cut`, … |
-| `printlab/` | Prüfung, Render, Slicen, CFS, Drucker (MCP-Server und CLI) |
-| `.claude/` | Befehle `/teil`, `/drucken`, `/status`, `/kalibrieren` und Freigaberegeln für Claude Code |
-| `.mcp.json` | startet printlab für Claude Code über `uv` (ohne absolute Pfade) |
+| `slicetheprompt/` | Prüfung, Render, Slicen, CFS, Drucker (MCP-Server und CLI) |
+| `.claude/` | Befehle `/teil`, `/drucken`, `/status`, `/kalibrieren`, `/schablone` (`/stencil`) und Freigaberegeln für Claude Code |
+| `.mcp.json` | startet slicetheprompt für Claude Code über `uv` (ohne absolute Pfade) |
 | `projects/<datum>-<name>/` | je Teil: `spec.yaml`, `model.py`, `out/` mit STEP, STL, PNG, G-Code |
 
 ## Ohne Claude (Kommandozeile)
 
 ```powershell
-uv run printlab ui                       # printlab Studio (3D-Viewer, Fehler-Overlays, Versionen & Markierung)
-uv run printlab new halter --material petg
-uv run printlab run <projekt>            # bauen, prüfen, rendern
-uv run printlab slice <projekt>          # gibt einen Freigabe-Token aus
-uv run printlab print <token>            # hochladen und starten
-uv run printlab status
+uv run slicetheprompt ui                       # SliceThePrompt (3D-Viewer, Fehler-Overlays, Versionen & Markierung)
+uv run slicetheprompt new halter --material petg
+uv run slicetheprompt run <projekt>            # bauen, prüfen, rendern
+uv run slicetheprompt schablone <projekt> --z 0 12 --hoehe 2   # Passungs-Testdruck (Alias: stencil)
+uv run slicetheprompt slice <projekt>          # gibt einen Freigabe-Token aus
+uv run slicetheprompt print <token>            # hochladen und starten
+uv run slicetheprompt status
 ```
 
 ## Git
@@ -110,7 +112,7 @@ verwenden: `git config user.email "<ID>+<name>@users.noreply.github.com"`.
 ## Profile ändern
 
 `config/slicer.yaml` zeigt die gewählten Profile und Alternativen. Namen dort ändern und
-`uv run printlab setup --keep-selection` ausführen.
+`uv run slicetheprompt setup --keep-selection` ausführen.
 
 ## Grenzen
 

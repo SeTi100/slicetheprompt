@@ -1,4 +1,4 @@
-"""Versionshistorie und Snapshots für printlab Studio (WP-1)."""
+"""Versionshistorie und Snapshots für SliceThePrompt (WP-1)."""
 
 from __future__ import annotations
 

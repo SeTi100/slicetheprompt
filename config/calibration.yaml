@@ -1,4 +1,4 @@
-# Von 'printlab applycal' geschrieben. Überlagert printer.yaml.
+# Von 'slicetheprompt applycal' geschrieben. Überlagert printer.yaml.
 materials:
   pla:
     hole_add: 0.3

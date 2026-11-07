@@ -1,6 +1,6 @@
 .venv/
 __pycache__/
-.printlab/
+.slicetheprompt/
 config/slicer/
 config/slicer.yaml
 projects/*/out/

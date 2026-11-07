@@ -140,7 +140,7 @@ def build(project: str, timeout: int = 180) -> dict:
                     pass
     try:
         proc = subprocess.run(
-            [sys.executable, "-m", "printlab._cad_runner", str(d / "model.py"), str(out)],
+            [sys.executable, "-m", "slicetheprompt._cad_runner", str(d / "model.py"), str(out)],
             capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout,
             cwd=str(Path(__file__).resolve().parents[1]),
         )
@@ -185,12 +185,12 @@ def prepare(project: str, orientation: str = "wie modelliert") -> dict:
     rot = mc.rotate(tris, R)
     placed = mc.place_on_bed(rot, (bed["x"], bed["y"]))
     shift = (placed - rot).reshape(-1, 3)[0]
-    write_stl(d / "out" / "print.stl", placed, header=f"printlab {d.name}")
+    write_stl(d / "out" / "print.stl", placed, header=f"slicetheprompt {d.name}")
     files = {}
     for n in names:
         t = mc.rotate(bodies[n], R) + shift
         f = d / "out" / f"print_{body_slug(n)}.stl"
-        write_stl(f, t, header=f"printlab {d.name} {n}")
+        write_stl(f, t, header=f"slicetheprompt {d.name} {n}")
         files[n] = str(f)
 
     # Ghost-STLs verfehlter Schnitte in Drucklage transformieren
@@ -206,7 +206,7 @@ def prepare(project: str, orientation: str = "wie modelliert") -> dict:
         g_tris = read_stl(g_path)
         g_placed = mc.rotate(g_tris, R) + shift
         out_ghost = d / "out" / f"{g_path.stem}_print.stl"
-        write_stl(out_ghost, g_placed, header=f"printlab {d.name} {g_path.stem}")
+        write_stl(out_ghost, g_placed, header=f"slicetheprompt {d.name} {g_path.stem}")
         ghost_files[g_path.stem] = str(out_ghost)
 
     info = {
@@ -339,6 +339,102 @@ def _short(r: dict) -> dict:
         "bed_contact_mm2": r["print"].get("bed_contact_mm2"),
         "bodies": r.get("bodies") or None,
     }
+
+
+STENCIL_SUFFIX = "-schablone"
+
+STENCIL_MODEL = '''\
+"""Schablone (Passungs-Testdruck) von {quelle}
+
+Dünne Scheibe(n) aus dem Originalteil, um Löcher, Stifte und Passungen mit wenig Material und Zeit
+zu prüfen. Das Original wird bei jedem Build frisch aus seinem model.py erzeugt – Änderungen dort
+landen automatisch auch hier. Angelegt mit `slicetheprompt schablone`.
+"""
+from pathlib import Path
+
+from build123d import *
+from lib.parts import *
+
+set_material("{material}")
+
+# ---- Parameter ----
+QUELLE = Path(__file__).resolve().parents[1] / "{quelle}" / "model.py"
+Z = {z!r}              # Schnitthöhen im Original (mm), je eine Scheibe
+HOEHE = {hoehe!r}           # Dicke je Scheibe (mm)
+
+# ---- Geometrie ----
+part, SCHEIBEN = stencil(load_model(QUELLE), z=Z, height=HOEHE)
+
+# ---- Selbstprüfung ----
+checks = {{f"Scheibe z={{s['z_von']}}: Dicke": (s["groesse_mm"][2], s["hoehe"], 0.01) for s in SCHEIBEN}}
+'''
+
+
+def _stencil_dir(src: Path) -> Path | None:
+    base = re.sub(r"^\d{4}-\d{2}-\d{2}-", "", src.name)
+    found = sorted(d for d in PROJECTS_DIR.glob(f"*-{base}{STENCIL_SUFFIX}") if d.is_dir())
+    return found[-1] if found else None
+
+
+def new_stencil(project: str, z: float | list[float] = 0.0, hoehe: float = 2.0) -> dict:
+    """Schablone (dünner Passungs-Testdruck) aus einem Projekt: legt <projekt>-schablone an
+    (oder aktualisiert sie), baut, prüft und rendert sie. Danach normal slicen und drucken."""
+    cfg = load_config()
+    src = project_dir(project)
+    if src.name.endswith(STENCIL_SUFFIX):
+        raise ValueError("Das ist schon eine Schablone – bitte das Originalprojekt angeben")
+    if not (src / "model.py").exists():
+        raise FileNotFoundError(f"{src.name}: model.py fehlt")
+    zs = [round(float(v), 3) for v in (z if isinstance(z, (list, tuple)) else [z])] or [0.0]
+    hoehe = round(float(hoehe), 3)
+    lh = cfg["rules"]["layer_height"]
+    if hoehe < 3 * lh:
+        raise ValueError(f"Schablone zu dünn: mindestens {3 * lh:.1f} mm (3 Schichten)")
+    spec = load_spec(src)
+    material = (spec.get("material") or cfg.get("default_material", "pla")).lower()
+    z_txt = ", ".join(f"{v:g}" for v in zs)
+
+    d = _stencil_dir(src)
+    created = d is None
+    if created:
+        p = new_project(re.sub(r"^\d{4}-\d{2}-\d{2}-", "", src.name) + STENCIL_SUFFIX, material,
+                        f"Schablone von {src.name}")
+        d = Path(p["path"])
+    (d / "model.py").write_text(
+        STENCIL_MODEL.format(quelle=src.name, material=material, z=zs if len(zs) > 1 else zs[0], hoehe=hoehe),
+        encoding="utf-8")
+    fil = spec.get("filament")
+    st_spec = {
+        "name": d.name[11:],
+        "beschreibung": f"Schablone (Passungs-Testdruck) von {src.name}: {hoehe:g} mm dick bei z = {z_txt}",
+        "schablone_von": src.name,
+        "material": material,
+        "qualitaet": spec.get("qualitaet") or "standard",
+        "menge": 1,
+        "filament": fil if isinstance(fil, str) else None,
+        "bbox": None,
+        "bbox_tol": 0.05,
+        "masse": [f"Scheibe(n) {hoehe:g} mm dick ab z = {z_txt} mm aus dem Original, Masse in XY unverändert"],
+        "annahmen": ["Nur zum Prüfen der Passungen; Toleranzen und Lochmasse identisch mit dem Original"]
+                    + (["Mehrfarbiges Original: Schablone einfarbig (alle Körper vereint)"]
+                       if isinstance(fil, dict) else []),
+    }
+    (d / "spec.yaml").write_text(
+        "# Schablone – von 'slicetheprompt schablone' erzeugt. Parameter in model.py (Z, HOEHE).\n"
+        + yaml.safe_dump(st_spec, allow_unicode=True, sort_keys=False), encoding="utf-8")
+
+    res = run_all(d.name, reason=f"schablone z={z_txt} h={hoehe:g}")
+    res["project"] = d.name
+    res["quelle"] = src.name
+    res["neu_angelegt"] = created
+    bi = build_info(d)
+    src_vol = build_info(src).get("volume_mm3")
+    if bi.get("volume_mm3") and src_vol:
+        res["material_anteil_pct"] = round(100 * bi["volume_mm3"] / src_vol, 1)
+    cuts = [f for f in build_info(src).get("features") or [] if f.get("role") in ("cut", "feature")]
+    if cuts:
+        res["features_z"] = [{"name": f["name"], "z": [f["bbox_min"][2], f["bbox_max"][2]]} for f in cuts]
+    return res
 
 
 def list_projects() -> list[dict]:

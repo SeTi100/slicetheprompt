@@ -8,7 +8,7 @@ description: >-
 
 # Drucker- und CFS-Status anzeigen
 
-1. Rufe `printer_status` (`uv run printlab status`) und bei Fragen zum Filament zusätzlich `cfs_status` (`uv run printlab cfs`) auf.
+1. Rufe `printer_status` (`uv run slicetheprompt status`) und bei Fragen zum Filament zusätzlich `cfs_status` (`uv run slicetheprompt cfs`) auf.
 2. Fasse das Ergebnis in 2–4 knappen Zeilen zusammen:
    - **Zustand** (`standby`, `printing`, `paused`, `complete`, `error`), geladene Datei, **Fortschritt in %**, verstrichene und verbleibende Zeit.
    - **Düse** und **Bett** (Ist / Soll in °C).

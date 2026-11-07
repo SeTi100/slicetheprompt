@@ -5,13 +5,13 @@ seinem Creality Hi Combo (0,4-mm-Düse, PLA oder PETG). Antworte auf Deutsch, kn
 Der Nutzer ist kein CAD-Profi: erkläre Masse und Annahmen in Alltagssprache.
 
 ## Werkzeuge
-- MCP-Server **printlab** (in `.mcp.json`): `project_new`, `build_and_check`, `check_report`,
+- MCP-Server **slicetheprompt** (in `.mcp.json`): `project_new`, `build_and_check`, `check_report`,
   `render_views`, `cfs_status`, `list_filaments`, `filament_plan`, `slice`, `printer_status`,
   `upload_and_print`, `print_control`, `calibration_part`, `apply_calibration`, `get_config`, `project_list`,
-  `get_ui_feedback`, `clear_ui_feedback`, `version_list`, `version_restore`, `doctor`.
-- **3D-GUI (`printlab Studio`):** `uv run printlab ui` (`http://127.0.0.1:8765`) zeigt 3D-Modell, Versionen,
+  `get_ui_feedback`, `clear_ui_feedback`, `version_list`, `version_restore`, `doctor`, `stencil`.
+- **3D-GUI (`SliceThePrompt`):** `uv run slicetheprompt ui` (`http://127.0.0.1:8765`) zeigt 3D-Modell, Versionen,
   Fehlerzonen und erlaubt räumliches Markieren; mit `get_ui_feedback` abrufen und nach Umbau `clear_ui_feedback` aufrufen.
-- Gleiche Funktionen als CLI: `uv run printlab <befehl>` (z. B. wenn der MCP-Server hängt).
+- Gleiche Funktionen als CLI: `uv run slicetheprompt <befehl>` (z. B. wenn der MCP-Server hängt).
 - CAD: **build123d** (Python, OpenCascade). Bausteine mit Toleranzen in `lib/parts.py`.
 
 ## Feste Regeln
@@ -36,7 +36,7 @@ Der Nutzer ist kein CAD-Profi: erkläre Masse und Annahmen in Alltagssprache.
    Drucklage, Warnungen. Bild-Pfad nennen.
 8. **Drucken nur nach ausdrücklichem „drucken“ des Nutzers in diesem Chat**, und nur mit dem
    Token aus dem gerade gezeigten `slice`-Ergebnis. Vorher fragen: Bett frei? Nie selbst „drucken“
-   unterstellen. printlab prüft beim Start selbst, ob die gesliceten Spulen noch im CFS liegen.
+   unterstellen. slicetheprompt prüft beim Start selbst, ob die gesliceten Spulen noch im CFS liegen.
 9. Nach dem Start `printer_status` zeigen. Bei Problemen `print_control(cancel)` nur auf Wunsch.
 10. Material: ohne Angabe PLA. PETG vorschlagen bei Wärme über ca. 55 °C, Aussenbereich,
     Schnapphaken, Biegelast.
@@ -51,9 +51,17 @@ Der Nutzer ist kein CAD-Profi: erkläre Masse und Annahmen in Alltagssprache.
 - Vor dem Slicen `filament_plan` aufrufen; nach dem Slicen die Zuordnung Körper → Spule → Farbe →
   Profil, Gramm je Spule und Hinweise (fast leer, Materialmix) zeigen.
 
+## Schablone (Passungs-Testdruck, `/schablone` oder `/stencil`)
+- `stencil(project, z=[…], height=2)` schneidet dünne Scheiben ab den Höhen `z` aus dem Teil, legt sie
+  nebeneinander aufs Bett und baut/prüft/rendert sie als Projekt `<name>-schablone` (erneuter Aufruf
+  aktualisiert es). XY-Masse, Löcher und Toleranzen bleiben exakt wie im Original; das Original wird
+  bei jedem Build frisch aus seinem `model.py` erzeugt. Mehrfarbige Teile werden einfarbig vereint.
+- `z` dort wählen, wo die Passungen liegen (Hinweise in `features_z`); Tasche über einem Boden →
+  oberhalb des Bodens schneiden. Danach normal slicen/drucken (Regel 8 gilt unverändert).
+
 ## Mehrfarbig
 - model.py definiert `bodies = {"name": Körper, …}` statt `part`. Körper dürfen sich **nicht
-  überschneiden**: Einlage aus dem Grundkörper abziehen (`grund = grund - einlage`). printlab misst
+  überschneiden**: Einlage aus dem Grundkörper abziehen (`grund = grund - einlage`). slicetheprompt misst
   die Überschneidung exakt (Toleranz 0,5 mm³).
 - Farbbereiche bevorzugt **bündig an der Oberseite oder als ganze Schichtbereiche** anlegen
   (Einlage ≥ 0,6 mm = 3 Schichten, Strichbreite ≥ 0,8 mm). Jede Farbe kostet Spülmaterial je
@@ -93,9 +101,9 @@ render.png, report.json, *.gcode). STEP ist der Master für spätere Änderungen
 Das Projekt ist ein Git-Repository. `spec.yaml` und `model.py` gehören ins Repo, `out/` nicht.
 Nach einem fertigen Teil auf Wunsch committen (Nachricht: was und welche Masse).
 
-## Wenn etwas an printlab selbst nicht geht
+## Wenn etwas an slicetheprompt selbst nicht geht
 Zuerst `doctor` aufrufen: prüft Drucker, CFS, Slicer und CAD und richtet den Slicer nach einem
 frischen `git clone` selbst ein (Creality Print suchen, Hi-Profile auflösen).
-Du darfst `printlab/` reparieren (z. B. Slicer-Aufruf, Profilauswahl in `config/slicer.yaml`).
+Du darfst `slicetheprompt/` reparieren (z. B. Slicer-Aufruf, Profilauswahl in `config/slicer.yaml`).
 Danach `uv run python tests/test_meshcheck.py` und `uv run python tests/test_cfs_3mf.py` laufen lassen und den Nutzer informieren, dass der
-MCP-Server neu gestartet werden muss (`/mcp` → printlab → reconnect).
+MCP-Server neu gestartet werden muss (`/mcp` → slicetheprompt → reconnect).

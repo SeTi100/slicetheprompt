@@ -79,5 +79,5 @@ def apply_calibration(material: str, measured: dict[str, float], notes: str = ""
     if notes:
         hist["notes"] = notes
     cal.setdefault("history", []).append(hist)
-    write_yaml(CALIBRATION_YAML, cal, header="Von 'printlab applycal' geschrieben. Überlagert printer.yaml.")
+    write_yaml(CALIBRATION_YAML, cal, header="Von 'slicetheprompt applycal' geschrieben. Überlagert printer.yaml.")
     return {"material": mat, "deviation_mm": dev, "new": entry}

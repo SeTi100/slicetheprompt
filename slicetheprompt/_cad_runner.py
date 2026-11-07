@@ -1,6 +1,6 @@
 """Führt ein build123d-Modellskript aus und exportiert STEP + STL.
 
-Aufruf (durch printlab.cad):  python -m printlab._cad_runner <model.py> <outdir>
+Aufruf (durch slicetheprompt.cad):  python -m slicetheprompt._cad_runner <model.py> <outdir>
 
 Vertrag für model.py:
   * einfarbig:   Variable `part` (build123d Part/Solid/Compound oder BuildPart)
@@ -55,7 +55,7 @@ def main() -> int:
     try:
         from build123d import Compound, export_step, export_stl
 
-        ns = runpy.run_path(str(model), run_name="__printlab__")
+        ns = runpy.run_path(str(model), run_name="__slicetheprompt__")
         bodies_in = ns.get("bodies")
         bodies: dict = {}
         if bodies_in:

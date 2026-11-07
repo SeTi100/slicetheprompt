@@ -15,7 +15,7 @@ import math
 
 from build123d import (Align, Axis, Box, Cone, Cylinder, Pos, RegularPolygon, chamfer, extrude)
 
-from printlab.config import load_config
+from slicetheprompt.config import load_config
 
 _CFG = load_config()
 _MATERIAL = _CFG.get("default_material", "pla")
@@ -212,6 +212,72 @@ def bottom_chamfer(part, size: float | None = None):
     except Exception as exc:  # z. B. Kanten zu kurz
         WARNINGS.append(f"bottom_chamfer({size}) nicht möglich: {exc}")
         return part
+
+
+# ---------------------------------------------------------------- Schablone (Passungs-Testdruck)
+
+def load_model(model_py):
+    """Führt ein anderes model.py aus und gibt seinen Körper zurück (`part`, bei `bodies` alle vereint)."""
+    import runpy
+    import sys
+    from pathlib import Path
+
+    from build123d import Compound
+
+    model_py = Path(model_py).resolve()
+    if str(model_py.parent) not in sys.path:
+        sys.path.insert(0, str(model_py.parent))
+    ns = runpy.run_path(str(model_py), run_name="__slicetheprompt_quelle__")
+    if ns.get("bodies"):
+        shapes = [_unwrap(b) for b in ns["bodies"].values()]
+        return Compound(children=shapes)
+    part = ns.get("part")
+    if part is None:
+        raise RuntimeError(f"{model_py} definiert weder 'part' noch 'bodies'")
+    part = _unwrap(part)
+    if isinstance(part, (list, tuple)):
+        part = Compound(children=list(part))
+    return part
+
+
+def stencil(part, z=0.0, height: float = 2.0, gap: float = 5.0):
+    """Dünner Passungs-Testdruck: Scheibe(n) von z bis z + height aus `part`, auf z = 0 gelegt.
+
+    z: Höhe (oder Liste von Höhen) im Modell, ab der geschnitten wird – dort, wo die Passungen liegen.
+    Mehrere Scheiben werden in X nebeneinander gelegt (Abstand `gap`). Geschnittene Unterseiten
+    (z > 0) bekommen wieder eine bottom_chamfer. Gibt (Körper, Liste der Scheiben-Infos) zurück."""
+    from build123d import Compound
+
+    p = _unwrap(part)
+    zs = [float(v) for v in (z if isinstance(z, (list, tuple)) else [z])]
+    bb = p.bounding_box()
+    pad = 1.0
+    slices, info = [], []
+    x_next = None
+    for z0 in zs:
+        if not (bb.min.Z - 1e-6 <= z0 < bb.max.Z):
+            raise ValueError(f"Schnitthöhe z = {z0} liegt ausserhalb des Teils ({bb.min.Z:.2f} … {bb.max.Z:.2f})")
+        z1 = min(z0 + height, bb.max.Z)
+        cutter = Pos(bb.center().X, bb.center().Y, z0) * Box(bb.size.X + 2 * pad, bb.size.Y + 2 * pad, z1 - z0,
+                                                             align=_C)
+        s = p & cutter
+        vol = float(getattr(s, "volume", 0.0))
+        if vol < 0.01:
+            raise ValueError(f"Bei z = {z0} … {z1} ist kein Material – andere Höhe wählen")
+        s = Pos(0, 0, -z0) * s
+        if z0 > bb.min.Z + 1e-6:
+            s = bottom_chamfer(s)
+        sbb = s.bounding_box()
+        if x_next is not None:
+            s = Pos(x_next - sbb.min.X, 0, 0) * s
+            sbb = s.bounding_box()
+        x_next = sbb.max.X + gap
+        slices.append(s)
+        info.append({"z_von": round(z0, 3), "z_bis": round(z1, 3), "hoehe": round(z1 - z0, 3),
+                     "volumen_mm3": round(float(s.volume), 2),
+                     "groesse_mm": [round(sbb.size.X, 2), round(sbb.size.Y, 2), round(sbb.size.Z, 2)]})
+    out = slices[0] if len(slices) == 1 else Compound(children=slices)
+    return out, info
 
 
 _NAMES = dir()

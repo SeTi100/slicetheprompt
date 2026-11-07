@@ -67,7 +67,7 @@ class Moonraker:
         }
 
     def cfs(self) -> dict:
-        """CFS-Spulen (Platz, Werkzeug-Nr., Material, Farbe, Rest) – siehe printlab.cfs."""
+        """CFS-Spulen (Platz, Werkzeug-Nr., Material, Farbe, Rest) – siehe slicetheprompt.cfs."""
         from .cfs import parse_box
         st = self._req("GET", "/printer/objects/query?box&filament_rack")["status"]
         if not st.get("box"):

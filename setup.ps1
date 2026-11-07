@@ -3,7 +3,7 @@
 #   powershell -ExecutionPolicy Bypass -File .\setup.ps1
 # Optionen:
 #   -Exe "C:\Pfad\zu\CrealityPrint.exe"   falls der Slicer nicht gefunden wird
-#   -Desktop                               printlab zusaetzlich in die Claude-Desktop-App eintragen
+#   -Desktop                               slicetheprompt zusaetzlich in die Claude-Desktop-App eintragen
 #                                          (App vorher ganz beenden)
 
 param([string]$Exe = "", [switch]$Desktop)
@@ -17,7 +17,7 @@ $env:PYTHONIOENCODING = "utf-8"
 function Step($t) { Write-Host ""; Write-Host "### $t" -ForegroundColor Cyan }
 
 Step "1/5 uv (Python-Paketverwaltung)"
-# Die Claude-App startet printlab ueber "uv" aus dem dauerhaften PATH. Ein uv, das nur in einer
+# Die Claude-App startet slicetheprompt ueber "uv" aus dem dauerhaften PATH. Ein uv, das nur in einer
 # aktivierten conda-/venv-Umgebung liegt, findet sie nicht -> eigenes uv installieren.
 $persistPath = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [Environment]::GetEnvironmentVariable("Path", "User")
 $uvPersistent = $persistPath -split ";" | Where-Object { $_ -and (Test-Path (Join-Path $_ "uv.exe")) } | Select-Object -First 1
@@ -46,7 +46,7 @@ uv sync --python 3.12
 if ($LASTEXITCODE -ne 0) { throw "uv sync fehlgeschlagen" }
 
 Step "3/5 Drucker, Slicer, Profile"
-if ($Exe -ne "") { uv run printlab setup --exe "$Exe" } else { uv run printlab setup }
+if ($Exe -ne "") { uv run slicetheprompt setup --exe "$Exe" } else { uv run slicetheprompt setup }
 $setupOk = ($LASTEXITCODE -eq 0)
 
 Step "4/5 Selbsttests (Netzpruefung, CFS, 3MF)"
@@ -54,12 +54,12 @@ uv run python tests/test_meshcheck.py
 uv run python tests/test_cfs_3mf.py
 
 Step "5/5 CAD-Tests: Beispiel-Box mit M3-Loechern, zweifarbiges Schild"
-uv run printlab run beispiel-box-m3
-uv run printlab run beispiel-schild-zweifarbig
+uv run slicetheprompt run beispiel-box-m3
+uv run slicetheprompt run beispiel-schild-zweifarbig
 
 if ($Desktop) {
     Step "Claude-Desktop-App"
-    uv run printlab install claude-desktop
+    uv run slicetheprompt install claude-desktop
 }
 
 Write-Host ""
@@ -69,6 +69,6 @@ if ($setupOk) {
     Write-Host "Einrichtung mit Warnungen - Ausgabe oben pruefen (Slicer oder Drucker)." -ForegroundColor Yellow
 }
 Write-Host ""
-Write-Host "Claude Code:    in diesem Ordner 'claude' starten (printlab wird ueber .mcp.json geladen)" -ForegroundColor White
-Write-Host "Claude Desktop: App beenden, dann 'uv run printlab install claude-desktop', App starten" -ForegroundColor White
+Write-Host "Claude Code:    in diesem Ordner 'claude' starten (slicetheprompt wird ueber .mcp.json geladen)" -ForegroundColor White
+Write-Host "Claude Desktop: App beenden, dann 'uv run slicetheprompt install claude-desktop', App starten" -ForegroundColor White
 Write-Host "Beispiel:       /teil Wandhalter fuer Ladegeraet 68 x 32 x 15 mm, 2 Schraubloecher 4 mm, PETG"
