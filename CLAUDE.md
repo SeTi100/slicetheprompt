@@ -8,7 +8,7 @@ Der Nutzer ist kein CAD-Profi: erkläre Masse und Annahmen in Alltagssprache.
 - MCP-Server **slicetheprompt** (in `.mcp.json`): `project_new`, `build_and_check`, `check_report`,
   `render_views`, `cfs_status`, `list_filaments`, `filament_plan`, `slice`, `printer_status`,
   `upload_and_print`, `print_control`, `calibration_part`, `apply_calibration`, `get_config`, `project_list`,
-  `get_ui_feedback`, `clear_ui_feedback`, `version_list`, `version_restore`, `doctor`.
+  `get_ui_feedback`, `clear_ui_feedback`, `version_list`, `version_restore`, `doctor`, `stencil`.
 - **3D-GUI (`SliceThePrompt`):** `uv run slicetheprompt ui` (`http://127.0.0.1:8765`) zeigt 3D-Modell, Versionen,
   Fehlerzonen und erlaubt räumliches Markieren; mit `get_ui_feedback` abrufen und nach Umbau `clear_ui_feedback` aufrufen.
 - Gleiche Funktionen als CLI: `uv run slicetheprompt <befehl>` (z. B. wenn der MCP-Server hängt).
@@ -50,6 +50,14 @@ Der Nutzer ist kein CAD-Profi: erkläre Masse und Annahmen in Alltagssprache.
   ehrlich melden (nächstliegende Farbe nennen) statt still zu ersetzen.
 - Vor dem Slicen `filament_plan` aufrufen; nach dem Slicen die Zuordnung Körper → Spule → Farbe →
   Profil, Gramm je Spule und Hinweise (fast leer, Materialmix) zeigen.
+
+## Schablone (Passungs-Testdruck, `/schablone` oder `/stencil`)
+- `stencil(project, z=[…], height=2)` schneidet dünne Scheiben ab den Höhen `z` aus dem Teil, legt sie
+  nebeneinander aufs Bett und baut/prüft/rendert sie als Projekt `<name>-schablone` (erneuter Aufruf
+  aktualisiert es). XY-Masse, Löcher und Toleranzen bleiben exakt wie im Original; das Original wird
+  bei jedem Build frisch aus seinem `model.py` erzeugt. Mehrfarbige Teile werden einfarbig vereint.
+- `z` dort wählen, wo die Passungen liegen (Hinweise in `features_z`); Tasche über einem Boden →
+  oberhalb des Bodens schneiden. Danach normal slicen/drucken (Regel 8 gilt unverändert).
 
 ## Mehrfarbig
 - model.py definiert `bodies = {"name": Körper, …}` statt `part`. Körper dürfen sich **nicht
