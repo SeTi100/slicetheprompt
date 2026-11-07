@@ -130,6 +130,29 @@ def _unwrap(p):
     return p
 
 
+_MAX_ANCHORS = 12
+
+
+def _anchor_faces(result, before=None) -> list:
+    """Flächen, an denen sich ein Feature später wiederfinden lässt.
+
+    Features werden dort gemessen, wo sie entstehen. Verschiebt oder dreht model.py den Körper danach
+    (z. B. `Pos(70, 0, 0) * rad(...)`) und vereint ihn mit anderen, behalten unveränderte Flächen ihre
+    OpenCascade-Identität (TShape), nur ihre Lage ändert sich. Der Build sucht diese Flächen im
+    fertigen Teil und verschiebt das Feature mit (slicetheprompt/_cad_runner.py).
+    Bevorzugt werden Flächen, die der Schnitt neu erzeugt hat (liegen direkt am Feature)."""
+    try:
+        faces = list(result.faces())
+        if before is not None:
+            old = set(before.faces())          # build123d: Hash/Gleichheit über IsSame (TShape + Lage)
+            new = [f for f in faces if f not in old]
+            if new:
+                faces = new
+        return [f.wrapped for f in faces[:_MAX_ANCHORS]]
+    except Exception:  # Verfolgung ist nur Komfort für Studio, nie ein Build-Fehler
+        return []
+
+
 def tag(name: str, shape, role: str = "feature"):
     """Registriert einen benannten Körper in FEATURES und gibt shape unverändert zurück."""
     s = _unwrap(shape)
@@ -144,6 +167,7 @@ def tag(name: str, shape, role: str = "feature"):
         "center": [round(float(ctr.X), 4), round(float(ctr.Y), 4), round(float(ctr.Z), 4)],
         "volume_mm3": round(vol, 4),
         "_shape": s,
+        "_anchors": _anchor_faces(s),
     }
     FEATURES.append(feat)
     return shape
@@ -172,6 +196,7 @@ def cut_feature(part, name: str, cutter):
         "cutter_volume_mm3": round(c_vol, 4),
         "removed_volume_mm3": round(removed, 4),
         "_shape": c,
+        "_anchors": _anchor_faces(res, p),
     }
 
     if removed < 0.01:

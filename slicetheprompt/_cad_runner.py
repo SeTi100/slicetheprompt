@@ -33,6 +33,54 @@ def _unwrap(p):
     return p
 
 
+def _relocate_features(features: list[dict], final_shape) -> None:
+    """Verschiebt Features an ihre Lage im fertigen Teil.
+
+    lib.parts misst ein Feature dort, wo es entsteht, und merkt sich einige Flächen (`_anchors`).
+    Wurde der Körper danach verschoben/gedreht (z. B. `Pos(70, 0, 0) * rad(...)`), findet sich dieselbe
+    Fläche (gleiche TShape) im fertigen Teil mit anderer Lage; deren Differenz ist die Transformation
+    des Features. Ohne Treffer (Fläche durch spätere Schnitte verändert) bleibt das Feature, wie es war."""
+    from build123d import Location
+
+    from OCP.gp import gp_Pnt, gp_TrsfForm
+    from OCP.TopAbs import TopAbs_FACE
+    from OCP.TopExp import TopExp_Explorer
+
+    final_faces = []
+    exp = TopExp_Explorer(final_shape.wrapped, TopAbs_FACE)
+    while exp.More():
+        final_faces.append(exp.Current())
+        exp.Next()
+
+    for feat in features:
+        trsf = None
+        for anchor in feat.get("_anchors") or []:
+            hit = next((f for f in final_faces if f.IsPartner(anchor)), None)
+            if hit is not None:
+                trsf = hit.Location().Transformation().Multiplied(anchor.Location().Transformation().Inverted())
+                break
+        if trsf is None:
+            continue
+        t = trsf.TranslationPart()
+        if trsf.Form() == gp_TrsfForm.gp_Identity or (trsf.Form() == gp_TrsfForm.gp_Translation
+                                                      and abs(t.X()) + abs(t.Y()) + abs(t.Z()) < 1e-6):
+            continue
+        lo, hi = feat["bbox_min"], feat["bbox_max"]
+        pts = [gp_Pnt(x, y, z).Transformed(trsf)
+               for x in (lo[0], hi[0]) for y in (lo[1], hi[1]) for z in (lo[2], hi[2])]
+        xs, ys, zs = [p.X() for p in pts], [p.Y() for p in pts], [p.Z() for p in pts]
+        feat["bbox_min"] = [round(min(xs), 4), round(min(ys), 4), round(min(zs), 4)]
+        feat["bbox_max"] = [round(max(xs), 4), round(max(ys), 4), round(max(zs), 4)]
+        c = gp_Pnt(*feat["center"]).Transformed(trsf)
+        feat["center"] = [round(c.X(), 4), round(c.Y(), 4), round(c.Z(), 4)]
+        if feat.get("_shape") is not None:
+            try:
+                feat["_shape"] = Location(trsf) * feat["_shape"]
+            except Exception:
+                pass
+        feat["moved"] = True
+
+
 def main() -> int:
     model = Path(sys.argv[1]).resolve()
     out = Path(sys.argv[2]).resolve()
@@ -114,9 +162,13 @@ def main() -> int:
                                    "ist": round(v, 3), "soll": 0.0, "tol": 0.5, "ok": v <= 0.5})
         lp = sys.modules.get("lib.parts")
         raw_features = list(getattr(lp, "FEATURES", []))
+        try:
+            _relocate_features(raw_features, part)
+        except Exception as exc:  # nur Komfort für Studio, nie ein Build-Fehler
+            result.setdefault("notes", []).append(f"Feature-Lage nicht verfolgt: {exc}")
         features_clean = []
         for feat in raw_features:
-            f_clean = {k: v for k, v in feat.items() if k != "_shape"}
+            f_clean = {k: v for k, v in feat.items() if not k.startswith("_")}
             if feat.get("empty_cut"):
                 slug = _slug(feat["name"])
                 ghost_path = out / f"ghost_{slug}.stl"

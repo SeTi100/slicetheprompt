@@ -329,7 +329,13 @@ function activeClipPlanes() {
   return S.clip.axis === "off" ? [] : [clipPlane];
 }
 
+// Jeder Aufruf bekommt eine Nummer. Läuft ein neuerer (Projekt-/Versionswechsel während des
+// Ladens), bricht der ältere nach seinem nächsten await ab, statt seine Netze dazuzumischen.
+let sceneGeneration = 0;
+
 async function rebuildSceneGeometry(fitCameraAfter = false) {
+  const gen = ++sceneGeneration;
+  const stale = () => gen !== sceneGeneration;
   clearGroup(meshGroup);
   clearGroup(edgesGroup);
   clearGroup(errorGroup);
@@ -349,6 +355,7 @@ async function rebuildSceneGeometry(fitCameraAfter = false) {
     if (!url) continue;
     try {
       const geo = await loadSTL(url);
+      if (stale()) return;
       geo.computeVertexNormals();
       geo.computeBoundingBox();
 
@@ -391,6 +398,7 @@ async function rebuildSceneGeometry(fitCameraAfter = false) {
     if (!gUrl) continue;
     try {
       const gGeo = await loadSTL(gUrl);
+      if (stale()) return;
       gGeo.computeVertexNormals();
       const gMat = new THREE.MeshStandardMaterial({
         color: 0xff2e4c,
@@ -416,7 +424,8 @@ async function rebuildSceneGeometry(fitCameraAfter = false) {
   ghostCutGroup.visible = S.overlays.errors;
 
   // 3. Build Triangle-Exact 3D Diagnostic Overlays (thin_walls, overhangs, bad_bridges, floating_parts, open_edges)
-  await buildDiagnosticOverlays();
+  await buildDiagnosticOverlays(gen);
+  if (stale()) return;
 
   // 4. Build Tagged Feature Wireframes
   buildFeatureFrames();
@@ -424,6 +433,7 @@ async function rebuildSceneGeometry(fitCameraAfter = false) {
   // 5. Rebuild Annotations & Ghost Version in active coordinate space
   rebuildAnnotationVisuals();
   await rebuildGhostVersionMesh();
+  if (stale()) return;
   updateClipPlane();
   renderSceneLegend();
 
@@ -432,7 +442,7 @@ async function rebuildSceneGeometry(fitCameraAfter = false) {
   }
 }
 
-async function buildDiagnosticOverlays() {
+async function buildDiagnosticOverlays(gen = sceneGeneration) {
   clearGroup(errorGroup);
   const diag = S.state?.diagnostics || {};
   const fullUrl = S.viewMode === "print" ? S.state?.full_print_stl_url : S.state?.full_model_stl_url;
@@ -440,6 +450,7 @@ async function buildDiagnosticOverlays() {
   if (fullUrl) {
     try {
       const fullGeo = await loadSTL(fullUrl);
+      if (gen !== sceneGeneration) return;
       const posAttr = fullGeo.getAttribute("position");
       const totalTris = Math.floor(posAttr.count / 3);
 
@@ -535,7 +546,10 @@ function buildFeatureFrames() {
   syncHtmlLabels();
 }
 
+let ghostGeneration = 0;
+
 async function rebuildGhostVersionMesh() {
+  const gen = ++ghostGeneration;
   clearGroup(ghostVersionGroup);
   const banner = document.getElementById("ghost-active-banner");
   if (!S.ghostVersion || !S.currentProject) {
@@ -549,6 +563,7 @@ async function rebuildGhostVersionMesh() {
   const url = `/api/projects/${encodeURIComponent(S.currentProject)}/files/history/${encodeURIComponent(S.ghostVersion)}/${fname}?t=${Date.now()}`;
   try {
     const geo = await loadSTL(url);
+    if (gen !== ghostGeneration) return;
     geo.computeVertexNormals();
     const mat = new THREE.MeshStandardMaterial({
       color: 0xf59e0b,
@@ -1250,6 +1265,8 @@ async function loadProjectsList(selectProjectName = null) {
   }
 }
 
+let selectSeq = 0;
+
 async function selectProject(projName, version = null, fitCam = true) {
   if (!projName) return;
   const projectChanged = projName !== S.currentProject;
@@ -1261,7 +1278,10 @@ async function selectProject(projName, version = null, fitCam = true) {
   }
 
   const q = version ? `?version=${encodeURIComponent(version)}` : "";
-  S.state = await apiFetch(`/api/projects/${encodeURIComponent(projName)}/state${q}`);
+  const req = ++selectSeq;
+  const state = await apiFetch(`/api/projects/${encodeURIComponent(projName)}/state${q}`);
+  if (req !== selectSeq) return; // inzwischen anderes Projekt/andere Version gewählt
+  S.state = state;
 
   // Restore saved open feedback annotations when switching to project live view
   if (projectChanged) {

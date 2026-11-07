@@ -417,6 +417,38 @@ checks = {"Dummy": (1, 1, 0.01)}
         assert report_data["passed"] is False, "Pipeline check must report passed=False when empty cut check fails"
 
 
+def test_features_follow_transforms():
+    """Features eines später verschobenen/gedrehten Körpers landen an ihrer Lage im fertigen Teil."""
+    import subprocess
+
+    model_code = """\
+from build123d import *
+from lib.parts import *
+C = (Align.CENTER, Align.CENTER, Align.MIN)
+
+def rad(name):
+    k = Cylinder(10, 5, align=C)
+    return cut_feature(k, f"{name}_loch", Pos(0, 0, -1) * Cylinder(2, 7, align=C))
+
+a = rad("a")
+b = Pos(40, 0, 0) * rad("b")
+c = Rot(0, 0, 90) * (Pos(0, 30, 0) * rad("c"))    # (0, 30) gedreht um 90° -> (-30, 0)
+part = a + b + c
+"""
+    with tempfile.TemporaryDirectory(prefix="slicetheprompt_test_feat_") as tmp:
+        tmp_dir = Path(tmp)
+        (tmp_dir / "model.py").write_text(model_code, encoding="utf-8")
+        subprocess.run([sys.executable, "-m", "slicetheprompt._cad_runner", str(tmp_dir / "model.py"),
+                        str(tmp_dir / "out")], cwd=str(_TESTS_DIR.parent), capture_output=True, check=True)
+        build = json.loads((tmp_dir / "out" / "build.json").read_text(encoding="utf-8"))
+        feats = {f["name"]: f for f in build["features"]}
+        for name, (x, y) in {"a_loch": (0, 0), "b_loch": (40, 0), "c_loch": (-30, 0)}.items():
+            cx, cy, _ = feats[name]["center"]
+            assert abs(cx - x) < 0.01 and abs(cy - y) < 0.01, f"{name}: Mitte {feats[name]['center']} statt ({x}, {y})"
+        assert feats["b_loch"]["bbox_min"][0] == 38.0 and feats["b_loch"]["bbox_max"][0] == 42.0
+        assert not any(k.startswith("_") for f in build["features"] for k in f), "interne Felder in build.json"
+
+
 # ==============================================================================
 # 4. test_diagnostics_3d_and_coord_transform
 # ==============================================================================
@@ -687,6 +719,7 @@ def run_all_tests() -> int:
         ("test_snapshots_and_restore", test_snapshots_and_restore),
         ("test_ast_params", test_ast_params),
         ("test_empty_cut_detection", test_empty_cut_detection),
+        ("test_features_follow_transforms", test_features_follow_transforms),
         ("test_diagnostics_3d_and_coord_transform", test_diagnostics_3d_and_coord_transform),
         ("test_ui_http_endpoints_and_feedback", test_ui_http_endpoints_and_feedback),
     ]
