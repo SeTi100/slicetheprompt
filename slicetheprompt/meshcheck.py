@@ -371,7 +371,12 @@ def analyse(tris: np.ndarray, cfg: dict, spec: dict | None = None, print_orienta
             str(edges["nonmanifold_edges"]), "0")
     rep.add("Normalen einheitlich", edges["inconsistent_edges"] == 0 and vol > 0,
             f"{edges['inconsistent_edges']} Kanten, Volumen {'positiv' if vol > 0 else 'negativ'}", "0, positiv")
-    rep.add("Anzahl Körper", n_bodies == 1, str(n_bodies), "1", severity="warn")
+    want = int(spec["koerper"]) if spec and spec.get("koerper") else None   # spec.yaml: koerper: 3 (getrennte Teile)
+    if want:
+        rep.add("Anzahl Körper", n_bodies == want, str(n_bodies), f"{want} (spec.yaml: koerper)")
+    else:
+        rep.add("Anzahl Körper", n_bodies == 1, str(n_bodies), "1 (mehrere gewollt? spec.yaml: koerper: n)",
+                severity="warn")
 
     # Bauraum: in jeder Lage prüfen, wie es tatsächlich gedruckt wird
     fits = size[0] <= usable["x"] and size[1] <= usable["y"] and size[2] <= usable["z"]

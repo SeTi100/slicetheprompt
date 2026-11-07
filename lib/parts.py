@@ -13,7 +13,8 @@ from __future__ import annotations
 
 import math
 
-from build123d import (Align, Axis, Box, Cone, Cylinder, Pos, RegularPolygon, chamfer, extrude)
+from build123d import (Align, Axis, Box, Circle, Cone, Cylinder, Line, Pos, RegularPolygon, ThreePointArc, Vector,
+                       Wire, chamfer, extrude, make_face, offset)
 
 from slicetheprompt.config import load_config
 
@@ -225,8 +226,58 @@ def pin(d: float, height: float, material: str | None = None):
     return Cylinder(pin_d(d, material) / 2, height, align=_C)
 
 
+def sector_face(r_out: float, a_start: float, a_end: float, r_in: float = 0.0):
+    """Kreissektor bzw. Ringsektor als 2D-Fläche in der XY-Ebene (Mitte im Ursprung).
+    Winkel in Grad, gegen den Uhrzeigersinn ab +X (a_end > a_start); ≥ 360° ergibt Kreis bzw. Ring."""
+    span = a_end - a_start
+    if span <= 0:
+        raise ValueError("sector: a_end muss grösser als a_start sein")
+    if r_in < 0 or r_in >= r_out:
+        raise ValueError("sector: 0 ≤ r_in < r_out")
+    if span >= 360 - 1e-9:
+        return Circle(r_out) - Circle(r_in) if r_in > 0 else Circle(r_out)
+
+    def P(r, a):
+        a = math.radians(a)
+        return Vector(r * math.cos(a), r * math.sin(a))
+
+    am = a_start + span / 2
+    if r_in > 0:
+        edges = [Line(P(r_in, a_start), P(r_out, a_start)), ThreePointArc(P(r_out, a_start), P(r_out, am), P(r_out, a_end)),
+                 Line(P(r_out, a_end), P(r_in, a_end)), ThreePointArc(P(r_in, a_end), P(r_in, am), P(r_in, a_start))]
+    else:
+        o = Vector(0, 0)
+        edges = [Line(o, P(r_out, a_start)), ThreePointArc(P(r_out, a_start), P(r_out, am), P(r_out, a_end)),
+                 Line(P(r_out, a_end), o)]
+    return make_face(Wire(edges))
+
+
+def sector(r_out: float, a_start: float, a_end: float, height: float, r_in: float = 0.0):
+    """Kreis-/Ringsektor als Körper von z = 0 bis height (Hebel, Wippen, Segmente). Winkel wie sector_face."""
+    return extrude(sector_face(r_out, a_start, a_end, r_in), amount=height)
+
+
+def bottom_inset(part, inset: float = 0.15, height: float | None = None):
+    """Rückt die untersten Schichten (Standard 2 × Schichthöhe) um `inset` nach innen – Ersatz für die
+    Fase bei feinen Konturen (Zähne, Rippen, Schrift), an denen eine Fase nicht möglich ist."""
+    p = _unwrap(part)
+    h = height if height is not None else 2 * _CFG["rules"]["layer_height"]
+    bb = p.bounding_box()
+    zmin = bb.min.Z
+    bottom = [f for f in p.faces() if abs(f.center().Z - zmin) < 1e-4 and f.normal_at().Z < -0.99]
+    if not bottom:
+        return part
+    slab = Pos(bb.center().X, bb.center().Y, zmin) * Box(bb.size.X + 2, bb.size.Y + 2, h, align=_C)
+    inner = extrude(offset(bottom, amount=-inset), amount=h)
+    if abs(inner.bounding_box().min.Z - zmin) > 1e-4:     # Fläche zeigt nach unten → Extrusion nach -Z
+        inner = Pos(0, 0, zmin - inner.bounding_box().min.Z) * inner
+    return (p - slab) + (inner & p)
+
+
 def bottom_chamfer(part, size: float | None = None):
-    """Fase an allen Kanten der untersten Ebene (gegen Elefantenfuss)."""
+    """Fase an allen Kanten der untersten Ebene (gegen Elefantenfuss), auch an Bohrungen auf z = 0 –
+    dort deshalb keine eigene Fase/Kegel schneiden. Geht die Fase nicht (Kanten zu kurz, z. B. Zähne),
+    wird stattdessen die unterste Schicht eingerückt (bottom_inset)."""
     size = size if size is not None else _CFG["rules"]["bottom_chamfer"]
     zmin = part.bounding_box().min.Z
     edges = part.edges().filter_by_position(Axis.Z, zmin - 1e-4, zmin + 1e-4)
@@ -235,8 +286,15 @@ def bottom_chamfer(part, size: float | None = None):
     try:
         return chamfer(edges, size)
     except Exception as exc:  # z. B. Kanten zu kurz
-        WARNINGS.append(f"bottom_chamfer({size}) nicht möglich: {exc}")
-        return part
+        inset = min(size, 0.15)
+        try:
+            res = bottom_inset(part, inset)
+            WARNINGS.append(f"bottom_chamfer({size}) nicht möglich ({type(exc).__name__}) – stattdessen unterste "
+                            f"Schichten um {inset} mm eingerückt (bottom_inset)")
+            return res
+        except Exception as exc2:
+            WARNINGS.append(f"bottom_chamfer({size}) nicht möglich: {exc}; bottom_inset ebenfalls nicht: {exc2}")
+            return part
 
 
 # ---------------------------------------------------------------- Schablone (Passungs-Testdruck)

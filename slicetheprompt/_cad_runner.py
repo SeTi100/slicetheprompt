@@ -185,7 +185,8 @@ def main() -> int:
             features_clean.append(f_clean)
         result["features"] = features_clean
         result["checks"] = checks
-        result["warnings"] = list(getattr(lp, "WARNINGS", [])) + list(ns.get("WARNINGS") or [])
+        # `from lib.parts import *` holt dieselbe Liste ins Modell – doppelte Einträge entfernen
+        result["warnings"] = list(dict.fromkeys(list(getattr(lp, "WARNINGS", [])) + list(ns.get("WARNINGS") or [])))
 
         export_step(part, str(out / "model.step"))
         export_stl(part, str(out / "model.stl"), tolerance=0.01, angular_tolerance=0.1)

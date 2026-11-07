@@ -2,7 +2,7 @@
 description: Aktuelles Projekt slicen, Kennzahlen zeigen und nach Bestätigung auf dem Hi drucken
 argument-hint: [projekt] [pla|petg] [fein|standard|grob] [Spule/Farbe, z. B. T1C oder schwarz]
 ---
-Drucke ein Projekt auf dem Creality Hi nach CLAUDE.md, Regel 8.
+Drucke ein Projekt auf dem Creality Hi nach AGENTS.md, Regel 8.
 
 Argumente: $ARGUMENTS  (ohne Projekt: das zuletzt bearbeitete; ohne Material/Qualität: aus spec.yaml)
 

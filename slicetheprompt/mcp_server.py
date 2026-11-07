@@ -197,11 +197,14 @@ def doctor() -> dict:
 
 @server.tool()
 def get_config() -> dict:
-    """Aktuelle Regeln, Toleranzen (inkl. Kalibrierung), Grenzen und Slicer-Auswahl."""
+    """Aktuelle Regeln, Toleranzen (inkl. Kalibrierung), Grenzen, Slicer-Auswahl und unter `bausteine`
+    alle CAD-Funktionen aus lib/ (Signatur + Kurzbeschreibung) – lib/*.py muss dafür nicht gelesen werden."""
     def _c():
+        from .libref import lib_reference
         c = load_config()
         s = c.get("slicer", {})
         c["slicer"] = {k: s.get(k) for k in ("kind", "exe", "machine", "process", "filament")}
+        c["bausteine"] = lib_reference()
         return c
     return _safe(_c)
 
