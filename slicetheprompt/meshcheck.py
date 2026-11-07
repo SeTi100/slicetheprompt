@@ -80,14 +80,16 @@ def face_adjacency_components(faces: np.ndarray, mask: np.ndarray) -> list[np.nd
 
 # ---------------------------------------------------------------- Wandstärke
 
-def _ray_hits(origins, dirs, tris, chunk=None):
-    """Kleinster positiver Abstand Strahl→Dreieck (Möller-Trumbore), vektorisiert."""
+def _ray_hits(origins, dirs, tris, chunk=None, return_idx=False):
+    """Kleinster positiver Abstand Strahl→Dreieck (Möller-Trumbore), vektorisiert.
+    return_idx=True: zusätzlich Index des getroffenen Dreiecks (−1 = kein Treffer)."""
     if chunk is None:  # Speicher begrenzen: ca. 3 Mio. Strahl-Dreieck-Paare je Block
         chunk = max(1, int(3_000_000 / max(len(tris), 1)))
     v0 = tris[:, 0]
     e1 = tris[:, 1] - v0
     e2 = tris[:, 2] - v0
     out = np.full(len(origins), np.inf)
+    idx = np.full(len(origins), -1, dtype=np.int64)
     for s in range(0, len(origins), chunk):
         o = origins[s:s + chunk][:, None, :]
         d = dirs[s:s + chunk][:, None, :]
@@ -103,15 +105,19 @@ def _ray_hits(origins, dirs, tris, chunk=None):
         hit = ok & (u >= -1e-9) & (v >= -1e-9) & (u + v <= 1 + 1e-9) & (t > 1e-6)
         t = np.where(hit, t, np.inf)
         out[s:s + chunk] = t.min(axis=1)
-    return out
+        if return_idx:
+            j = t.argmin(axis=1)
+            idx[s:s + chunk] = np.where(np.isfinite(out[s:s + chunk]), j, -1)
+    return (out, idx) if return_idx else out
 
 
-def _ray_hits_local(origins, dirs, tris, maxlen=8.0, cell=6.0):
+def _ray_hits_local(origins, dirs, tris, maxlen=8.0, cell=6.0, return_idx=False):
     """Wie _ray_hits, aber je Gitterzelle nur Dreiecke in Reichweite (maxlen) prüfen."""
     tmin = tris.min(axis=1)
     tmax = tris.max(axis=1)
     keys = np.floor(origins / cell).astype(np.int64)
     out = np.full(len(origins), np.inf)
+    idx = np.full(len(origins), -1, dtype=np.int64)
     uniq, inv = np.unique(keys, axis=0, return_inverse=True)
     inv = inv.reshape(-1)
     for k in range(len(uniq)):
@@ -121,8 +127,77 @@ def _ray_hits_local(origins, dirs, tris, maxlen=8.0, cell=6.0):
         cand = np.all(tmax >= lo, axis=1) & np.all(tmin <= hi, axis=1)
         if not cand.any():
             continue
-        out[sel] = _ray_hits(origins[sel], dirs[sel], tris[cand])
+        if return_idx:
+            d, j = _ray_hits(origins[sel], dirs[sel], tris[cand], return_idx=True)
+            out[sel] = d
+            idx[sel] = np.where(j >= 0, np.nonzero(cand)[0][np.maximum(j, 0)], -1)
+        else:
+            out[sel] = _ray_hits(origins[sel], dirs[sel], tris[cand])
+    return (out, idx) if return_idx else out
+
+
+def _inside(points, tris) -> np.ndarray:
+    """Liegt der Punkt im Körper? Zählt Schnitte eines Strahls nach +z (gerade = aussen)."""
+    if len(points) == 0:
+        return np.zeros(0, bool)
+    tmin = tris.min(axis=1)
+    tmax = tris.max(axis=1)
+    v0, e1, e2 = tris[:, 0], tris[:, 1] - tris[:, 0], tris[:, 2] - tris[:, 0]
+    d = np.array([0.0, 0.0, 1.0])
+    out = np.zeros(len(points), bool)
+    for i, p in enumerate(points):
+        c = ((tmin[:, 0] <= p[0]) & (tmax[:, 0] >= p[0]) & (tmin[:, 1] <= p[1]) & (tmax[:, 1] >= p[1])
+             & (tmax[:, 2] >= p[2]))
+        if not c.any():
+            continue
+        a, b, e = v0[c], e1[c], e2[c]
+        pv = np.cross(d, e)
+        det = np.einsum("ij,ij->i", pv, b)
+        ok = np.abs(det) > 1e-12
+        inv = np.where(ok, 1.0 / np.where(ok, det, 1.0), 0.0)
+        tv = p - a
+        u = np.einsum("ij,ij->i", tv, pv) * inv
+        q = np.cross(tv, b)
+        v = q[:, 2] * inv
+        t = np.einsum("ij,ij->i", q, e) * inv
+        hit = ok & (u >= 0) & (v >= 0) & (u + v <= 1) & (t > 1e-6)
+        out[i] = int(hit.sum()) % 2 == 1
     return out
+
+
+# Klassen dünner Stellen (unter min_wall)
+WAND, KANTE, DETAIL, BEWUSST = 0, 1, 2, 3
+KLASSEN = {WAND: "wand", KANTE: "kante", DETAIL: "detail", BEWUSST: "bewusst"}
+
+
+def classify_thin(tris, pts, dirs, src_idx, hit_idx, rules, R=None, boxes=None) -> np.ndarray:
+    """Ordnet dünne Stellen ein (Punkte/Strahlen in Modellkoordinaten):
+    KANTE   – der Strahl trifft eine schräg anstossende Fläche (Winkel > ~18°): spitze Aussenkante, keine Wand;
+    DETAIL  – höchstens 3 Schichten hoch und darunter Vollmaterial (Gravur-Stege, Rippen auf einer Platte);
+    BEWUSST – liegt in einem Feature mit role="duenn" (Norm-Profil, Gitter, gewünschte dünne Wand);
+    WAND    – alles andere: echte zu dünne Wand.
+    R: Drehung Modell → Drucklage (für „unten“), boxes: [(min3, max3), …] in Modellkoordinaten."""
+    n = len(pts)
+    cls = np.full(n, WAND)
+    if n == 0:
+        return cls
+    normals = face_normals(tris)
+    ok_hit = hit_idx >= 0
+    dot = np.full(n, -1.0)
+    dot[ok_hit] = np.einsum("ij,ij->i", normals[src_idx[ok_hit]], normals[hit_idx[ok_hit]])
+    cls[dot > -0.95] = KANTE
+    R = np.eye(3) if R is None else np.asarray(R, float)
+    tris_p = tris @ R.T
+    depth = 3 * float(rules.get("layer_height", 0.2)) + 0.1
+    rest = np.nonzero(cls == WAND)[0]
+    if len(rest):
+        q = (pts[rest] - dirs[rest] * 0.1) @ R.T          # knapp ausserhalb der Wand
+        q[:, 2] -= depth                                   # 3 Schichten tiefer
+        cls[rest[_inside(q, tris_p)]] = DETAIL
+    for lo, hi in boxes or []:
+        lo, hi = np.asarray(lo, float) - 0.3, np.asarray(hi, float) + 0.3
+        cls[np.all((pts >= lo) & (pts <= hi), axis=1)] = BEWUSST
+    return cls
 
 
 def wall_thickness(tris: np.ndarray, samples: int = 1500, seed: int = 0, max_len: float = 8.0) -> dict:
@@ -135,7 +210,7 @@ def wall_thickness(tris: np.ndarray, samples: int = 1500, seed: int = 0, max_len
         return {"min": None, "p1": None, "samples": 0}
     rng = np.random.default_rng(seed)
     p = areas[idx_all] / areas[idx_all].sum()
-    pick = rng.choice(idx_all, size=min(samples, len(idx_all) * 4), p=p)
+    pick = rng.choice(idx_all, size=samples, p=p)   # auch grobe Netze (wenige grosse Dreiecke) dicht abtasten
     # Zufallspunkt im Dreieck
     r1, r2 = rng.random(len(pick)), rng.random(len(pick))
     flip = r1 + r2 > 1
@@ -144,7 +219,7 @@ def wall_thickness(tris: np.ndarray, samples: int = 1500, seed: int = 0, max_len
     pts = t[:, 0] + r1[:, None] * (t[:, 1] - t[:, 0]) + r2[:, None] * (t[:, 2] - t[:, 0])
     d = -normals[pick]
     origins = pts + d * 1e-4
-    dist = _ray_hits_local(origins, d, tris, maxlen=max_len)
+    dist, hit = _ray_hits_local(origins, d, tris, maxlen=max_len, return_idx=True)
     dist = np.minimum(dist, max_len)  # dicker als max_len zählt als max_len
     if len(dist) == 0:
         return {"min": None, "p1": None, "samples": 0}
@@ -153,8 +228,42 @@ def wall_thickness(tris: np.ndarray, samples: int = 1500, seed: int = 0, max_len
         "p1": round(float(np.percentile(dist, 1)), 3),
         "p5": round(float(np.percentile(dist, 5)), 3),
         "samples": int(len(dist)),
-        "_dist": dist,
+        "_dist": dist, "_pts": pts, "_dirs": d, "_src": pick, "_hit": hit,
     }
+
+
+def _wall_checks(rep, tris, rules, prefix="", R=None, boxes=None, wand_soll=None) -> dict:
+    """Wandstärke prüfen und dünne Stellen einordnen (siehe classify_thin).
+    Fehler nur für echte Wände; spitze Kanten und Oberflächendetails als Warnung, bewusst Dünnes als Info."""
+    wt = wall_thickness(tris)
+    dist = wt.pop("_dist", None)
+    pts, dirs, src, hit = (wt.pop(k, None) for k in ("_pts", "_dirs", "_src", "_hit"))
+    if wt["p1"] is None:
+        return wt
+    mw = rules["min_wall"]
+    thin = np.nonzero(dist < mw)[0]
+    cls = np.full(len(dist), WAND)
+    cls[thin] = classify_thin(tris, pts[thin], dirs[thin], src[thin], hit[thin], rules, R, boxes)
+    wall = dist[cls == WAND]
+    p1 = float(np.percentile(wall, 1)) if len(wall) else float(mw)
+    p5 = float(np.percentile(wall, 5)) if len(wall) else float(mw)
+    wt.update({"p1_wand": round(p1, 3), "p5_wand": round(p5, 3), "share_below_min": round(len(thin) / len(dist), 4),
+               "duenn_nach_klasse": {KLASSEN[k]: int(((cls == k) & (dist < mw)).sum()) for k in KLASSEN}})
+    rep.add(f"{prefix}Mindestwandstärke (1. Perzentil)", p1 >= mw * 0.98, f"{p1:.2f} mm", f"≥ {mw} mm")
+    fw = float(rules["functional_wall"])
+    if wand_soll:
+        fw = min(fw, float(wand_soll))
+    rep.add(f"{prefix}Wandstärke Funktionsteil (5. Perzentil)", p5 >= fw * 0.98, f"{p5:.2f} mm",
+            f"≥ {fw:g} mm" + (" (spec: wand_soll)" if wand_soll else ""), severity="warn")
+    edge_sev = "warn" if ((cls == KANTE) & (dist < mw)).mean() >= 0.02 else "info"   # vereinzelt = kosmetisch
+    for k, rule, limit, sev in ((KANTE, "Spitze Kanten dünner als min_wall", "Kante stumpf (Fase) oder ≥ 90°", edge_sev),
+                                (DETAIL, "Oberflächendetails dünner als min_wall (≤ 3 Schichten)",
+                                 "druckt meist als 1 Linie; Stege breiter oder Teilung grösser", "warn"),
+                                (BEWUSST, "Bewusst dünn (role=\"duenn\")", "vom Modell so gewollt", "info")):
+            sel = dist[(cls == k) & (dist < mw)]
+            if len(sel):
+                rep.add(f"{prefix}{rule}", False, f"{len(sel)} Stellen, ab {sel.min():.2f} mm", limit, severity=sev)
+    return wt
 
 
 # ---------------------------------------------------------------- Bauteil auf dem Bett
@@ -343,8 +452,11 @@ class Report:
         }
 
 
-def analyse(tris: np.ndarray, cfg: dict, spec: dict | None = None, print_orientation: bool = False) -> Report:
-    """Prüft ein Netz. print_orientation=True: Netz liegt schon in Drucklage."""
+def analyse(tris: np.ndarray, cfg: dict, spec: dict | None = None, print_orientation: bool = False,
+            walls: bool = True, R=None, thin_boxes=None) -> Report:
+    """Prüft ein Netz. print_orientation=True: Netz liegt schon in Drucklage.
+    walls=False: Wandstärke auslassen (wird schon an anderer Stelle geprüft). R: Drehung Modell → Drucklage,
+    thin_boxes: Bereiche mit role="duenn" (Modellkoordinaten) – beides für die Einordnung dünner Stellen."""
     rules = cfg["rules"]
     usable = cfg["printer"]["usable"]
     rep = Report()
@@ -385,17 +497,15 @@ def analyse(tris: np.ndarray, cfg: dict, spec: dict | None = None, print_orienta
             "{:.1f} × {:.1f} × {:.1f} mm".format(*size),
             "{x} × {y} × {z} mm".format(**usable))
 
-    # Wandstärke
-    wt = wall_thickness(tris)
-    dist = wt.pop("_dist", None)
-    rep.metrics["wall_thickness"] = wt
-    if wt["p1"] is not None:
-        thin_share = float(np.mean(dist < rules["min_wall"])) if dist is not None else 0.0
-        rep.metrics["wall_thickness"]["share_below_min"] = round(thin_share, 4)
-        rep.add("Mindestwandstärke (1. Perzentil)", wt["p1"] >= rules["min_wall"] * 0.98,
-                f"{wt['p1']:.2f} mm", f"≥ {rules['min_wall']} mm")
-        rep.add("Wandstärke Funktionsteil (5. Perzentil)", wt["p5"] >= rules["functional_wall"] * 0.98,
-                f"{wt['p5']:.2f} mm", f"≥ {rules['functional_wall']} mm", severity="warn")
+    # Lage: model.py soll in Drucklage mit Unterkante auf z = 0 modellieren
+    if not print_orientation and mn[2] < -0.01:
+        rep.add("Teil beginnt auf z = 0", False, f"z_min = {mn[2]:.2f} mm",
+                "≥ 0 – Fläche nach −Z extrudiert? Polygon-Punkte gegen den Uhrzeiger angeben", severity="warn")
+
+    # Wandstärke (mit Einordnung dünner Stellen)
+    if walls:
+        rep.metrics["wall_thickness"] = _wall_checks(rep, tris, rules, R=R, boxes=thin_boxes,
+                                                     wand_soll=(spec or {}).get("wand_soll"))
 
     # Spezifikation
     if spec and spec.get("bbox"):
@@ -426,7 +536,41 @@ def analyse(tris: np.ndarray, cfg: dict, spec: dict | None = None, print_orienta
     return rep
 
 
-def analyse_bodies(bodies: dict, cfg: dict, spec: dict | None = None, print_bodies: dict | None = None) -> Report:
+def _inlay_checks(rep, name, tp, rules) -> dict:
+    """Farb-Einlage/Schrift (Netz in Drucklage): Tiefe (Z) und Strichbreite (XY) getrennt.
+    Fehler unter der Druckgrenze (2 Schichten bzw. 1 Linie), Warnung unter dem Richtwert aus printer.yaml."""
+    lh, lw = float(rules.get("layer_height", 0.2)), float(rules.get("line_width", 0.42))
+    want_d = float(rules.get("inlay_depth", rules.get("min_inlay", 0.6)))
+    want_s = float(rules.get("inlay_stroke", 0.8))
+    pts = tp.reshape(-1, 3)
+    depth = float(pts[:, 2].max() - pts[:, 2].min())
+    rep.add(f"[{name}] Einlage-Tiefe", depth >= 2 * lh - 1e-3, f"{depth:.2f} mm", f"≥ {2 * lh:.1f} mm (2 Schichten)")
+    if depth >= 2 * lh - 1e-3:
+        rep.add(f"[{name}] Einlage-Tiefe Richtwert", depth >= want_d - 1e-3, f"{depth:.2f} mm", f"≥ {want_d} mm",
+                severity="warn")
+    wt = wall_thickness(tp)
+    dist, dirs, src, hit = (wt.pop(k, None) for k in ("_dist", "_dirs", "_src", "_hit"))
+    wt.pop("_pts", None)
+    if dist is None:
+        return wt
+    nrm = face_normals(tp)
+    dot = np.full(len(dist), -1.0)
+    ok = hit >= 0
+    dot[ok] = np.einsum("ij,ij->i", nrm[src[ok]], nrm[hit[ok]])
+    # Strahlen quer = Strichbreite; Buchstabenecken (Strahl trifft schräge Nachbarfläche) zählen nicht
+    side = dist[(np.abs(dirs[:, 2]) < 0.3) & (dot <= -0.95)]
+    if len(side):
+        s1 = float(np.percentile(side, 1))
+        wt["strich_p1"] = round(s1, 3)
+        rep.add(f"[{name}] Strichbreite (1. Perzentil)", s1 >= lw * 0.98, f"{s1:.2f} mm", f"≥ {lw} mm (1 Linie)")
+        if s1 >= lw * 0.98:
+            rep.add(f"[{name}] Strichbreite Richtwert", s1 >= want_s * 0.98, f"{s1:.2f} mm", f"≥ {want_s} mm",
+                    severity="warn")
+    return wt
+
+
+def analyse_bodies(bodies: dict, cfg: dict, spec: dict | None = None, print_bodies: dict | None = None,
+                   R=None, thin_boxes=None) -> Report:
     """Mehrteiliges Modell: Topologie und Wandstärke je Körper, Bauraum/Spezifikation/Überhänge fürs Ganze.
     bodies / print_bodies: {name: Dreiecke} in Modell- bzw. Drucklage."""
     rules = cfg["rules"]
@@ -442,20 +586,14 @@ def analyse_bodies(bodies: dict, cfg: dict, spec: dict | None = None, print_bodi
                 f"{e['open_edges']} offen, {e['nonmanifold_edges']} mehrfach", "0, 0")
         rep.add(f"[{name}] Normalen einheitlich", e["inconsistent_edges"] == 0 and vol > 0,
                 f"{e['inconsistent_edges']} Kanten", "0")
-        wt = wall_thickness(t)
-        wt.pop("_dist", None)
-        per[name] = {"volume_mm3": round(abs(vol), 1), "triangles": int(len(t)), "wall_thickness": wt}
-        if wt["p1"] is None:
-            continue
         if name == main:
-            rep.add(f"[{name}] Mindestwandstärke (1. Perzentil)", wt["p1"] >= rules["min_wall"] * 0.98,
-                    f"{wt['p1']:.2f} mm", f"≥ {rules['min_wall']} mm")
-            rep.add(f"[{name}] Wandstärke Funktionsteil (5. Perzentil)", wt["p5"] >= rules["functional_wall"] * 0.98,
-                    f"{wt['p5']:.2f} mm", f"≥ {rules['functional_wall']} mm", severity="warn")
+            wt = _wall_checks(rep, t, rules, prefix=f"[{name}] ", R=R, boxes=thin_boxes,
+                              wand_soll=(spec or {}).get("wand_soll"))
         else:
-            lim = rules.get("min_inlay", 0.4)
-            rep.add(f"[{name}] Mindeststärke Einlage (1. Perzentil)", wt["p1"] >= lim * 0.98,
-                    f"{wt['p1']:.2f} mm", f"≥ {lim} mm")
+            tp = (print_bodies or {}).get(name)
+            tp = t if tp is None else tp
+            wt = _inlay_checks(rep, name, tp, rules)
+        per[name] = {"volume_mm3": round(abs(vol), 1), "triangles": int(len(t)), "wall_thickness": wt}
     union = np.concatenate(list(bodies.values()))
     pts = union.reshape(-1, 3)
     size = pts.max(0) - pts.min(0)
@@ -563,8 +701,22 @@ def diagnostics_3d(print_tris: np.ndarray, cfg: dict, build_data: dict | None = 
     d = -normals
     origins = centers + d * 1e-4
     # Nur „dünner als min_wall?“ zählt: Suche auf diese Reichweite begrenzen (gleiches Ergebnis, ~100× schneller)
-    dist = _ray_hits_local(origins, d, print_tris, maxlen=thin_threshold + 0.05, cell=2.0)
+    dist, hit = _ray_hits_local(origins, d, print_tris, maxlen=thin_threshold + 0.05, cell=2.0, return_idx=True)
     thin_mask = (dist < thin_threshold) & valid_tri_mask
+
+    # Bereiche mit role="duenn" in Drucklage (für die Einordnung)
+    thin_boxes_p = []
+    for feat in (build_data or {}).get("features", []):
+        if feat.get("role") == "duenn" and feat.get("bbox_min"):
+            (x0, y0, z0), (x1, y1, z1) = feat["bbox_min"], feat["bbox_max"]
+            cp = _to_print(np.array([[x, y, z] for x in (x0, x1) for y in (y0, y1) for z in (z0, z1)], float))
+            thin_boxes_p.append((cp.min(axis=0), cp.max(axis=0)))
+    labels_thin = {
+        WAND: ("error", "Wand zu dünn ({:.2f} mm < {:.2f} mm)"),
+        KANTE: ("warn", "Spitze Kante ({:.2f} mm < {:.2f} mm) – stumpf machen"),
+        DETAIL: ("warn", "Oberflächendetail ({:.2f} mm < {:.2f} mm, ≤ 3 Schichten)"),
+        BEWUSST: ("info", "Bewusst dünn ({:.2f} mm < {:.2f} mm, role=duenn)"),
+    }
 
     if faces is not None and thin_mask.any():
         for grp in face_adjacency_components(faces, thin_mask):
@@ -572,12 +724,19 @@ def diagnostics_3d(print_tris: np.ndarray, cfg: dict, build_data: dict | None = 
             if grp_area < 0.5:
                 continue
             min_thick = float(dist[grp].min())
+            sample = grp[np.unique(np.linspace(0, len(grp) - 1, min(12, len(grp))).astype(int))]
+            cls = classify_thin(print_tris, centers[sample], d[sample], sample, hit[sample], rules, None, thin_boxes_p)
+            k = int(np.bincount(cls, minlength=4).argmax())
+            sev, fmt = labels_thin[k]
             bbox_p, bbox_m, cen_p, cen_m = _calc_bbox_and_center(grp)
             thin_walls.append({
                 "id": f"thin_{len(thin_walls) + 1}",
                 "kind": "thin_wall",
-                "severity": "error",
-                "label": f"Wand zu dünn ({min_thick:.2f} mm < {thin_threshold:.2f} mm)",
+                "klasse": KLASSEN[k],
+                "min_mm": round(min_thick, 3),
+                "area_mm2": round(grp_area, 2),
+                "severity": sev,
+                "label": fmt.format(min_thick, thin_threshold),
                 "bbox_print": bbox_p,
                 "bbox_model": bbox_m,
                 "center_print": cen_p,

@@ -18,7 +18,8 @@ rules:                      # Geometrie-Regeln für 0.4-mm-Düse
   line_width: 0.42
   layer_height: 0.20
   min_wall: 0.84            # 2 Linien – dünner wird lückenhaft (Fehler)
-  min_inlay: 0.4            # Farb-Einlagen/Schrift: mindestens 2 Schichten dick
+  inlay_depth: 0.6          # Farb-Einlage/Schrift: Richtwert Tiefe (3 Schichten); Fehler erst unter 2 Schichten
+  inlay_stroke: 0.8         # Farb-Einlage/Schrift: Richtwert Strichbreite; Fehler erst unter 1 Linie
   functional_wall: 1.6      # Funktionsteile mindestens 4 Linien (Warnung)
   min_feature: 0.8          # kleinstes horizontales Detail
   min_hole: 2.0             # kleinere Löcher nachbohren
@@ -26,8 +27,6 @@ rules:                      # Geometrie-Regeln für 0.4-mm-Düse
   max_bridge: 10            # mm Brücke ohne Stütze
   bottom_chamfer: 0.5       # Fase an der Unterkante statt Rundung
   min_bed_contact_mm2: 50
-  text_min_stroke: 0.6
-  text_min_depth: 0.6
 
 materials:                  # Startwerte, je Seite bzw. auf den Durchmesser in mm
   pla:

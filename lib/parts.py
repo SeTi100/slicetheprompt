@@ -155,7 +155,9 @@ def _anchor_faces(result, before=None) -> list:
 
 
 def tag(name: str, shape, role: str = "feature"):
-    """Registriert einen benannten Körper in FEATURES und gibt shape unverändert zurück."""
+    """Registriert einen benannten Körper in FEATURES und gibt shape unverändert zurück.
+    role="duenn": Bereich ist bewusst dünner als min_wall (Norm-Profil, Gitterstege, gewünschte dünne Wand) –
+    die Prüfung meldet dort dann nur einen Hinweis statt eines Fehlers."""
     s = _unwrap(shape)
     bb = s.bounding_box()
     vol = float(getattr(s, "volume", 0.0))

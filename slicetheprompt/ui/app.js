@@ -1425,7 +1425,7 @@ function renderDiagnosticsList() {
   // 1. Spatial 3D diagnostic clusters (clickable camera fly-to!)
   for (const tw of diag.thin_walls || []) {
     items.push({
-      severity: "error",
+      severity: tw.severity || "error",
       title: tw.label || "Zu dünne Wand",
       sub: `Modell (${fmtVec(tw.center_model)}) mm · Klick fokussiert 3D-Stelle`,
       bbox_print: tw.bbox_print,
@@ -1694,7 +1694,7 @@ function renderChecksAndSpec() {
       .map(
         (c) => `
       <tr>
-        <td>${c.ok ? `<span style="color:var(--green)">✓</span>` : `<span style="color:${c.severity === "warn" ? "var(--amber)" : "var(--red)"}">✗</span>`} ${escapeHtml(c.rule)}</td>
+        <td>${c.ok ? `<span style="color:var(--green)">✓</span>` : `${c.severity === "info" ? `<span style="color:var(--muted, #888)">ℹ</span>` : `<span style="color:${c.severity === "warn" ? "var(--amber)" : "var(--red)"}">✗</span>`}`} ${escapeHtml(c.rule)}</td>
         <td class="mono">${escapeHtml(String(c.value ?? ""))}</td>
         <td class="mono">${escapeHtml(String(c.limit ?? ""))}</td>
       </tr>`

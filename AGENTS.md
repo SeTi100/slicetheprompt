@@ -38,19 +38,24 @@ Der Nutzer ist kein CAD-Profi: erkläre Masse und Annahmen in Alltagssprache.
 4. model.py: alle Masse als benannte Parameter oben, Einheit mm; Teil in **Drucklage**
    modellieren (z nach oben, grösste ebene Fläche auf z = 0, Überhänge ≤ 45°, Brücken ≤ 10 mm);
    `bottom_chamfer(part)` an der Unterkante; `checks = {Name: (Ist, Soll, Toleranz)}` für jedes
-   Funktionsmass (Innenmass, Lochabstand, Lochdurchmesser), Ist-Werte aus der Geometrie messen.
+   Funktionsmass (Innenmass, Lochabstand, Lochdurchmesser), Ist-Werte aus der Geometrie messen;
+   Mindest-/Höchstmasse als `(Ist, ">=", Min)` bzw. `(Ist, "<=", Max)`.
    - `bottom_chamfer` fast **alle** Kanten auf z = 0, auch Bohrungen. Dort keine eigene Fase und keinen
      Kegel schneiden – das ergibt einen Überhang. Fasen an Bohrungen oben sind in Ordnung.
    - Zahnräder (und andere feine Konturen): `gear_solid(face, h, stufe=0.15)` statt `bottom_chamfer`.
      Scheitert `bottom_chamfer` trotzdem, rückt es die unterste Schicht selbst ein (Warnung, kein Fehler).
    - Mehrere getrennte Teile in einem Druck sind erlaubt: in spec.yaml `koerper: <Anzahl>` setzen,
      keine Verbindungsstege bauen.
+   - Bewusst dünner als `min_wall` (Norm-Profil, Gitterstege): Bereich mit `tag(name, körper, role="duenn")`
+     markieren. Wünscht der Nutzer eine dünne Wand (z. B. 1,2 mm), in spec.yaml `wand_soll: 1.2`.
 5. Fehlt ein kritisches Mass, **einmal** gezielt und gebündelt nachfragen (Merkliste im Ablauf `teil`).
    Unkritisches sinnvoll annehmen und in `annahmen` notieren.
 6. Nach jedem Build `build_and_check` und dann das PNG (`out/render.png`) **ansehen**. Was im Bild
    falsch aussieht, ist falsch. Bei Fehlern selbst korrigieren, höchstens 5 Runden, dann den Nutzer
-   fragen. `report.zones` nennt zu jeder Fehlerzone Ort (Modellkoordinaten), Fläche, das nächste
-   benannte Feature und einen Hinweis – erst wenn das nicht reicht, `out/diagnostics_3d.json` lesen.
+   fragen. `report.zones` fasst gleichartige Fehlerzonen zusammen (Anzahl, Ort der grössten in
+   Modellkoordinaten, Fläche, benanntes Feature, Hinweis zur Ursache) – erst wenn das nicht reicht,
+   `out/diagnostics_3d.json` lesen. Dünne Stellen sind eingeordnet: echte Wand (Fehler), spitze Kante oder
+   Oberflächendetail (Warnung), `role="duenn"` (Hinweis).
    Warnungen bewerten und erwähnen.
 7. Dem Nutzer vor dem Slicen zeigen: Aussenmasse, Funktionsmasse mit Toleranz, Material,
    Drucklage, Warnungen. Bild-Pfad nennen.
@@ -126,7 +131,10 @@ bb = part.bounding_box()                                  # bb.size.X / .Y / .Z,
   `.filter_by_position(Axis.Z, z0, z1)`; Flächen: `part.faces().sort_by(Axis.Z)[-1]`.
 - Hohlkörper: `offset(part, amount=-2, openings=part.faces().sort_by(Axis.Z)[-1])`.
 - `fillet`/`chamfer` scheitern bei zu grossen Radien → Radius verkleinern statt weglassen.
-- `shape.is_valid` ist eine Eigenschaft, keine Methode.
+- Fallen: `Polygon`-Punkte gegen den Uhrzeiger angeben (sonst zeigt die Fläche nach −Z und `extrude` geht nach
+  unten); `shape.is_valid` ist eine Eigenschaft; `Vector` hat `.X/.Y/.Z` und `tuple(v)`, kein `to_tuple()`;
+  `a & b - c` heisst `a & (b - c)` → klammern; `face.center()` ist der Flächenschwerpunkt, nicht die Lochachse;
+  Testskripte mit Umlauten/„×“ in der Windows-Konsole: `PYTHONUTF8=1` setzen.
 - Bei unbekannter API: kurzes Testskript mit `uv run python -c "…"` statt raten.
 
 ## Ablage und Git
