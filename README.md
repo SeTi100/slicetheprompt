@@ -240,7 +240,8 @@ uv run slicetheprompt status
 
 Das Projekt ist ein Git-Repository (GitHub: `SeTi100/slicetheprompt`, öffentlich). Nicht versioniert werden
 `.venv`, die rechnerspezifische Slicer-Konfiguration (`config/slicer.yaml`, `config/slicer/`),
-`.claude/settings.local.json` und alle `out/`-Ordner. Für eigene Commits die GitHub-noreply-Adresse
+`.claude/settings.local.json` und alle `out/`-Ordner. **Eigene Teile bleiben lokal:** `projects/` ist
+ignoriert, nur die Beispiele (`*-beispiel-*`, `*-kalibrierung-*`, `*-wuerfel-5mm`) sind im Repo. Für eigene Commits die GitHub-noreply-Adresse
 verwenden: `git config user.email "<ID>+<name>@users.noreply.github.com"`.
 
 ## Profile ändern

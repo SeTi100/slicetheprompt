@@ -98,6 +98,12 @@ bb = part.bounding_box()                                  # bb.size.X / .Y / .Z,
   `.filter_by_position(Axis.Z, z0, z1)`, `part.faces().sort_by(Axis.Z)[-1]`.
 - Hohlkörper: `offset(part, amount=-2, openings=part.faces().sort_by(Axis.Z)[-1])`.
 
+## Ablage und Git
+`projects/<datum>-<name>/`: `spec.yaml`, `model.py`, `out/`. Das Repository ist **öffentlich** und enthält
+nur das Werkzeug. **Eigene Teile bleiben lokal:** `projects/` steht in `.gitignore` (Ausnahmen:
+`*-beispiel-*`, `*-kalibrierung-*`, `*-wuerfel-5mm`). Projekte nie mit `git add -f` erzwingen, committen
+oder pushen; Versionen eines Teils liegen lokal in `history/` (`version_list`, `version_restore`).
+
 ## Wenn etwas an slicetheprompt selbst geändert wird
 Danach `uv run python tests/test_meshcheck.py` und `uv run python tests/test_cfs_3mf.py` ausführen
 und den Nutzer informieren, dass der MCP-Server neu verbunden werden muss: Codex neu starten
