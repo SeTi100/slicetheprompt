@@ -67,6 +67,16 @@ def build_and_check(project: str, orientation: str = "wie modelliert") -> dict:
 
 
 @server.tool()
+def stencil(project: str, z: list[float] | None = None, height: float = 2.0) -> dict:
+    """Schablone: dünnen Passungs-Testdruck aus einem Projekt erzeugen (Projekt '<name>-schablone',
+    wird bei erneutem Aufruf aktualisiert). Schneidet Scheibe(n) der Dicke `height` (mm, Standard 2)
+    ab den Höhen `z` (mm im Original, Standard [0] = Unterseite) und legt sie aufs Bett – Löcher,
+    Stifte und Aussenmasse in XY bleiben exakt wie im Original. z dort wählen, wo die Passungen liegen
+    (Hinweise in `features_z`). Baut, prüft und rendert sofort; danach PNG ansehen und normal slicen."""
+    return _safe(pipeline.new_stencil, project, z or [0.0], height)
+
+
+@server.tool()
 def check_report(project: str) -> dict:
     """Vollständigen Prüfbericht (alle Regeln, Wandstärken, Brücken, Bettkontakt) zurückgeben."""
     return _safe(pipeline.check, project)

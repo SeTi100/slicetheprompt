@@ -54,6 +54,7 @@ git pull
 | `/drucken schwarz` oder `/drucken T1C` | mit genau dieser Spule (Farbe oder CFS-Platz) |
 | `/status` | Fortschritt, Temperaturen, Restzeit |
 | `/kalibrieren pla` | Toleranz-Testteil drucken, messen, Werte übernehmen |
+| `/schablone halter` oder `/stencil halter` | dünne Scheibe (2 mm) aus dem Teil als schneller Passungs-Testdruck; z. B. `/schablone halter bei z 0 und 12` |
 | freier Text | z. B. „Mach den Halter 5 mm höher und druck ihn nochmal“ |
 | `/teil Namensschild 60 × 25 mm, weiss mit schwarzer Schrift „TIM“` | zweifarbig über das CFS |
 
@@ -85,7 +86,7 @@ slicetheprompt liest das CFS über Moonraker: Platz (T1A–T4D), Material, Farbe
 | `config/slicer.yaml`, `config/slicer/` | gewählte Creality-Print-Profile (vom Setup erzeugt) |
 | `lib/parts.py` | CAD-Bausteine mit Toleranzen: `screw_hole_cut`, `fit`, `nut_trap_cut`, … |
 | `slicetheprompt/` | Prüfung, Render, Slicen, CFS, Drucker (MCP-Server und CLI) |
-| `.claude/` | Befehle `/teil`, `/drucken`, `/status`, `/kalibrieren` und Freigaberegeln für Claude Code |
+| `.claude/` | Befehle `/teil`, `/drucken`, `/status`, `/kalibrieren`, `/schablone` (`/stencil`) und Freigaberegeln für Claude Code |
 | `.mcp.json` | startet slicetheprompt für Claude Code über `uv` (ohne absolute Pfade) |
 | `projects/<datum>-<name>/` | je Teil: `spec.yaml`, `model.py`, `out/` mit STEP, STL, PNG, G-Code |
 
@@ -95,6 +96,7 @@ slicetheprompt liest das CFS über Moonraker: Platz (T1A–T4D), Material, Farbe
 uv run slicetheprompt ui                       # SliceThePrompt (3D-Viewer, Fehler-Overlays, Versionen & Markierung)
 uv run slicetheprompt new halter --material petg
 uv run slicetheprompt run <projekt>            # bauen, prüfen, rendern
+uv run slicetheprompt schablone <projekt> --z 0 12 --hoehe 2   # Passungs-Testdruck (Alias: stencil)
 uv run slicetheprompt slice <projekt>          # gibt einen Freigabe-Token aus
 uv run slicetheprompt print <token>            # hochladen und starten
 uv run slicetheprompt status

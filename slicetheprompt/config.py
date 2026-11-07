@@ -74,6 +74,10 @@ def project_dir(name_or_path: str) -> Path:
     matches = sorted(d for d in PROJECTS_DIR.glob(f"*{name_or_path}*") if d.is_dir())
     if len(matches) == 1:
         return matches[0]
+    # exakter Name ohne Datumspräfix gewinnt (z. B. 'box' vor 'box-schablone')
+    exact = [m for m in matches if m.name[11:] == name_or_path or m.name == name_or_path]
+    if len(exact) == 1:
+        return exact[0]
     if len(matches) > 1:
         raise FileNotFoundError(
             f"Projekt '{name_or_path}' ist mehrdeutig: {', '.join(m.name for m in matches)}"

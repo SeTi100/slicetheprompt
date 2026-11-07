@@ -9,7 +9,7 @@ Der Nutzer ist kein CAD-Profi: erkläre Masse und Annahmen in Alltagssprache.
   `project_new`, `build_and_check`, `check_report`, `render_views`, `cfs_status`, `list_filaments`,
   `filament_plan`, `slice`, `printer_status`, `upload_and_print`, `print_control`,
   `calibration_part`, `apply_calibration`, `get_config`, `project_list`,
-  `get_ui_feedback`, `clear_ui_feedback`, `version_list`, `version_restore`, `doctor`.
+  `get_ui_feedback`, `clear_ui_feedback`, `version_list`, `version_restore`, `doctor`, `stencil`.
 - **3D-Inspektions- & Markierungs-GUI (`SliceThePrompt`):** `uv run slicetheprompt ui` (`http://127.0.0.1:8765`).
   Markiert der Nutzer dort Stellen per Pin/Box/Pfeil, liest `get_ui_feedback` die exakten Modellkoordinaten
   (`model_xyz`, `delta_model_mm`, `bbox_model`) samt markiertem Screenshot `out/ui_feedback.png`; nach Umbau
@@ -17,7 +17,7 @@ Der Nutzer ist kein CAD-Profi: erkläre Masse und Annahmen in Alltagssprache.
   und `cut_feature(part, "loch_1", ...)` benennen.
 - Gleiche Funktionen als CLI-Fallback (z. B. falls der MCP-Server noch nicht neu geladen wurde):
   `uv run slicetheprompt <befehl>`.
-- Workspace-Skills in `.agents/skills/`: `teil`, `drucken`, `kalibrieren`, `status`.
+- Workspace-Skills in `.agents/skills/`: `teil`, `drucken`, `kalibrieren`, `status`, `schablone`.
 - CAD: **build123d** (Python, OpenCascade). Bausteine mit Toleranzen in `lib/parts.py`.
 
 ## Feste Regeln
@@ -56,6 +56,12 @@ Der Nutzer ist kein CAD-Profi: erkläre Masse und Annahmen in Alltagssprache.
   ehrlich melden (nächstliegende Farbe nennen) statt still zu ersetzen.
 - Vor dem Slicen `filament_plan` aufrufen; nach dem Slicen die Zuordnung Körper → Spule → Farbe →
   Profil, Gramm je Spule und Hinweise (fast leer, Materialmix) zeigen.
+
+## Schablone (Passungs-Testdruck, Skill `schablone`)
+- `stencil(project, z=[…], height=2)` (CLI: `uv run slicetheprompt schablone <projekt> --z 0 12 --hoehe 2`)
+  schneidet dünne Scheiben ab den Höhen `z` aus dem Teil und baut/prüft/rendert sie als Projekt
+  `<name>-schablone`. XY-Masse und Toleranzen bleiben exakt wie im Original. `z` dort wählen, wo die
+  Passungen liegen (Hinweise in `features_z`). Danach normal slicen/drucken.
 
 ## Mehrfarbig
 - `model.py` definiert `bodies = {"name": Körper, …}` statt `part`. Körper dürfen sich **nicht

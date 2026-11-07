@@ -165,6 +165,13 @@ def main(argv=None) -> int:
     s = sub.add_parser("run", help="bauen + vorbereiten + prüfen + rendern")
     s.add_argument("project")
     s.add_argument("--orient", default=None)
+    s = sub.add_parser("schablone", aliases=["stencil"],
+                       help="dünnen Passungs-Testdruck (Scheibe) aus einem Projekt erzeugen")
+    s.add_argument("project")
+    s.add_argument("--z", nargs="+", type=lambda v: float(v.replace(",", ".")), default=[0.0],
+                   help="Schnitthöhe(n) im Original in mm (Standard 0 = Unterseite)")
+    s.add_argument("--hoehe", "--height", type=lambda v: float(v.replace(",", ".")), default=2.0,
+                   help="Dicke je Scheibe in mm (Standard 2)")
     s = sub.add_parser("slice")
     s.add_argument("project")
     s.add_argument("--material")
@@ -233,6 +240,8 @@ def main(argv=None) -> int:
             _out(pipeline.prepare(a.project, a.orient))
         elif a.cmd == "run":
             _out(pipeline.run_all(a.project, a.orient))
+        elif a.cmd in ("schablone", "stencil"):
+            _out(pipeline.new_stencil(a.project, a.z, a.hoehe))
         elif a.cmd == "slice":
             from .mcp_server import _parse_map
             _out(jobs.slice_project(a.project, a.material, a.quality, _parse_map(a.filament or ""),
