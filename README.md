@@ -32,6 +32,27 @@ Koordinaten, Feature-Namen und Screenshot über das MCP-Werkzeug `get_ui_feedbac
 Studio aktualisiert sich live, sobald der Agent neu baut, und **druckt nie selbst**: Druckstart nur im
 Chat nach deinem „drucken“.
 
+### 3D-Feedback an den Agenten (Beispiel: Lineal-Skala anpassen)
+
+Statt im Chat umständlich zu erklären, wo etwas geändert werden soll, klickst du direkt ins 3D-Modell.
+Du schreibst deine Anweisung im Web-GUI, ein Klick kopiert den fertigen Prompt in die Zwischenablage,
+und du fügst ihn im Agenten-Chat einfach per `Strg + V` ein:
+
+<p align="center">
+  <img src="docs/images/feedback-schritt1-gui-markieren.png" alt="Bereichsbox um die Skala und Button zum Speichern und Kopieren" width="100%">
+  <br><sub><b>1. Im Web-GUI markieren und Prompt kopieren:</b> Bereichsbox um die Zahlenreihe aufziehen, Änderungswunsch notieren („Mache die Zahlen abwechslungsweise versetzt, 0 unten, 10 oben…“) und auf <b>„Markierung speichern & Agent-Prompt kopieren“</b> klicken. Koordinaten, Feature-Zuordnung und Screenshot werden abgelegt, der fertige Satz landet in der Zwischenablage.</sub>
+</p>
+
+<p align="center">
+  <img src="docs/images/feedback-schritt2-chat-einfuegen.png" alt="Prompt im Agenten-Chat per Strg+V eingefügt und umgesetzt" width="85%">
+  <br><sub><b>2. Im Agenten-Chat einfügen (<code>Strg + V</code>):</b> Der Prompt wird ohne Tippaufwand im Chat abgesendet. Der Agent ruft <code>get_ui_feedback</code> auf, liest die 3D-Koordinaten sowie den Screenshot, passt <code>model.py</code> an, führt alle Maßprüfungen durch und meldet die neue Version (v002).</sub>
+</p>
+
+<p align="center">
+  <img src="docs/images/feedback-schritt3-gui-ergebnis.png" alt="Aktualisiertes 3D-Modell mit versetzten Zahlen im Studio" width="100%">
+  <br><sub><b>3. Live-Ergebnis im 3D-Viewer:</b> Das Studio aktualisiert sich automatisch. Die Zahlen sind abwechselnd in zwei Reihen versetzt, kollisionsfrei und bereit für den nächsten Schritt.</sub>
+</p>
+
 ### Prüfen
 
 | | |
