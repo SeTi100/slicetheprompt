@@ -98,8 +98,10 @@ bb = part.bounding_box()                                  # bb.size.X / .Y / .Z,
 ## Ablage und Git
 `projects/<datum>-<name>/`: `spec.yaml`, `model.py`, `out/` (model.step, model.stl, print.stl,
 render.png, report.json, *.gcode). STEP ist der Master für spätere Änderungen.
-Das Projekt ist ein Git-Repository. `spec.yaml` und `model.py` gehören ins Repo, `out/` nicht.
-Nach einem fertigen Teil auf Wunsch committen (Nachricht: was und welche Masse).
+Das Projekt ist ein **öffentliches** Git-Repository für das Werkzeug. **Eigene Teile bleiben lokal:**
+`projects/` steht in `.gitignore` (Ausnahmen: `*-beispiel-*`, `*-kalibrierung-*`, `*-wuerfel-5mm`).
+Projekte nie mit `git add -f` erzwingen, committen oder pushen. Versionen eines Teils liegen lokal in
+`history/` (`version_list`, `version_restore`). Committet werden nur Änderungen am Werkzeug selbst.
 
 ## Wenn etwas an slicetheprompt selbst nicht geht
 Zuerst `doctor` aufrufen: prüft Drucker, CFS, Slicer und CAD und richtet den Slicer nach einem

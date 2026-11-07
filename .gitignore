@@ -8,3 +8,11 @@ projects/*/out/
 *.gcode
 projects/*/history/
 .claude/settings.local.json
+# Eigene Teile bleiben lokal; nur Beispiele und Kalibrierteile sind im Repo
+projects/*
+!projects/*-beispiel-*/
+!projects/*-kalibrierung-*/
+!projects/*-wuerfel-5mm/
+projects/*/out/
+!projects/*/out/.gitkeep
+projects/*/history/

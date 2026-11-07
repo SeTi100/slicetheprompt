@@ -1,11 +1,14 @@
-# slicetheprompt – Arbeitsregeln für Antigravity
+# slicetheprompt – Arbeitsregeln für KI-Agenten (Codex, Antigravity, …)
+
+> Claude Code liest stattdessen `CLAUDE.md` (gleiche Regeln). Änderungen an den Regeln in beiden Dateien nachziehen.
 
 Du erzeugst aus Prompts des Nutzers exakte, druckfertige Teile und druckst sie nach Freigabe auf
 seinem Creality Hi Combo (0,4-mm-Düse, PLA oder PETG). Antworte auf Deutsch, knapp.
 Der Nutzer ist kein CAD-Profi: erkläre Masse und Annahmen in Alltagssprache.
 
 ## Werkzeuge
-- MCP-Server **slicetheprompt** (`mcp_slicetheprompt_*`, konfiguriert in `~/.gemini/config/mcp_config.json`):
+- MCP-Server **slicetheprompt** (eingetragen mit `uv run slicetheprompt install codex` bzw. `… install antigravity`;
+  Codex: `~/.codex/config.toml`, Antigravity: `~/.gemini/config/mcp_config.json`):
   `project_new`, `build_and_check`, `check_report`, `render_views`, `cfs_status`, `list_filaments`,
   `filament_plan`, `slice`, `printer_status`, `upload_and_print`, `print_control`,
   `calibration_part`, `apply_calibration`, `get_config`, `project_list`,
@@ -34,7 +37,7 @@ Der Nutzer ist kein CAD-Profi: erkläre Masse und Annahmen in Alltagssprache.
 5. Fehlt ein kritisches Mass, **einmal** gezielt nachfragen. Unkritisches sinnvoll annehmen und
    in `annahmen` notieren.
 6. Nach jedem Build `build_and_check` (`uv run slicetheprompt run <projekt>`) ausführen und dann das PNG
-   (`out/render.png`) mit `read_file` **ansehen**. Was im Bild falsch aussieht, ist falsch. Bei Fehlern
+   (`out/render.png`) mit dem Datei-/Bild-Werkzeug **ansehen**. Was im Bild falsch aussieht, ist falsch. Bei Fehlern
    selbst korrigieren (höchstens 5 Runden), dann den Nutzer fragen. Warnungen bewerten und erwähnen.
 7. Dem Nutzer vor dem Slicen zeigen: Aussenmasse, Funktionsmasse mit Toleranz, Material,
    Drucklage, Warnungen und Bildpfad.
@@ -95,7 +98,13 @@ bb = part.bounding_box()                                  # bb.size.X / .Y / .Z,
   `.filter_by_position(Axis.Z, z0, z1)`, `part.faces().sort_by(Axis.Z)[-1]`.
 - Hohlkörper: `offset(part, amount=-2, openings=part.faces().sort_by(Axis.Z)[-1])`.
 
+## Ablage und Git
+`projects/<datum>-<name>/`: `spec.yaml`, `model.py`, `out/`. Das Repository ist **öffentlich** und enthält
+nur das Werkzeug. **Eigene Teile bleiben lokal:** `projects/` steht in `.gitignore` (Ausnahmen:
+`*-beispiel-*`, `*-kalibrierung-*`, `*-wuerfel-5mm`). Projekte nie mit `git add -f` erzwingen, committen
+oder pushen; Versionen eines Teils liegen lokal in `history/` (`version_list`, `version_restore`).
+
 ## Wenn etwas an slicetheprompt selbst geändert wird
 Danach `uv run python tests/test_meshcheck.py` und `uv run python tests/test_cfs_3mf.py` ausführen
-und den Nutzer informieren, dass der MCP-Server in Antigravity (**Additional Options (...) > MCP Servers**)
-bzw. Claude Code (`/mcp`) neu verbunden werden sollte.
+und den Nutzer informieren, dass der MCP-Server neu verbunden werden muss: Codex neu starten
+(`/mcp` zeigt den Status), Antigravity **Customizations → MCP Servers → Refresh**, Claude Code `/mcp`.
