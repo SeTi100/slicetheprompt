@@ -45,8 +45,8 @@ class OrbitControls extends EventDispatcher {
 		this.cursor = new Vector3();
 
 		// How far you can dolly in and out ( PerspectiveCamera only )
-		this.minDistance = 0;
-		this.maxDistance = Infinity;
+		this.minDistance = 2;
+		this.maxDistance = 2500;
 
 		// How far you can zoom in and out ( OrthographicCamera only )
 		this.minZoom = 0;
@@ -269,7 +269,11 @@ class OrbitControls extends EventDispatcher {
 
 				} else {
 
-					spherical.radius = clampDistance( spherical.radius * scale );
+					if ( isFinite( scale ) && scale > 0 ) {
+
+						spherical.radius = clampDistance( spherical.radius * scale );
+
+					}
 
 				}
 
@@ -492,9 +496,9 @@ class OrbitControls extends EventDispatcher {
 
 		}
 
-		function getZoomScale( delta ) {
+		function getZoomScale( delta = 100 ) {
 
-			const normalized_delta = Math.abs( delta ) / ( 100 * ( window.devicePixelRatio | 0 ) );
+			const normalized_delta = Math.abs( delta ) / 100;
 			return Math.pow( 0.95, scope.zoomSpeed * normalized_delta );
 
 		}
@@ -594,6 +598,8 @@ class OrbitControls extends EventDispatcher {
 
 		function dollyOut( dollyScale ) {
 
+			if ( ! isFinite( dollyScale ) || dollyScale <= 0 ) return;
+
 			if ( scope.object.isPerspectiveCamera || scope.object.isOrthographicCamera ) {
 
 				scale /= dollyScale;
@@ -608,6 +614,8 @@ class OrbitControls extends EventDispatcher {
 		}
 
 		function dollyIn( dollyScale ) {
+
+			if ( ! isFinite( dollyScale ) || dollyScale <= 0 ) return;
 
 			if ( scope.object.isPerspectiveCamera || scope.object.isOrthographicCamera ) {
 
@@ -732,13 +740,24 @@ class OrbitControls extends EventDispatcher {
 
 			updateZoomParameters( event.clientX, event.clientY );
 
-			if ( event.deltaY < 0 ) {
+			let delta = event.deltaY;
+			if ( event.deltaMode === 1 ) {
+				// DOM_DELTA_LINE (Firefox default, typically 3 lines)
+				delta *= 33;
+			} else if ( event.deltaMode === 2 ) {
+				// DOM_DELTA_PAGE
+				delta *= 400;
+			}
 
-				dollyIn( getZoomScale( event.deltaY ) );
+			if ( ! isFinite( delta ) || delta === 0 ) return;
 
-			} else if ( event.deltaY > 0 ) {
+			if ( delta < 0 ) {
 
-				dollyOut( getZoomScale( event.deltaY ) );
+				dollyIn( getZoomScale( delta ) );
+
+			} else if ( delta > 0 ) {
+
+				dollyOut( getZoomScale( delta ) );
 
 			}
 

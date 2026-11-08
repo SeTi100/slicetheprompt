@@ -90,6 +90,8 @@ controls.enableDamping = true;
 controls.dampingFactor = 0.08;
 controls.screenSpacePanning = true;
 controls.zoomSpeed = 1.6;
+controls.minDistance = 2;
+controls.maxDistance = 2500;
 controls.target.set(130, 130, 15);
 
 // Trackpad Wheel Normalization:
@@ -98,15 +100,19 @@ controls.target.set(130, 130, 15);
 canvas.addEventListener(
   "wheel",
   (ev) => {
-    // Falls feine Pixel-Deltas vom Trackpad kommen, gezielt dynamisch verstärken
+    // Falls feine Pixel-Deltas vom Trackpad kommen, gezielt dynamisch verstaerken
     if (Math.abs(ev.deltaY) < 40 && ev.deltaMode === 0) {
       const factor = ev.deltaY < 0 ? 0.92 : 1.08;
-      camera.position.sub(controls.target).multiplyScalar(factor).add(controls.target);
+      const offset = camera.position.clone().sub(controls.target);
+      const newLen = Math.max(controls.minDistance, Math.min(controls.maxDistance, offset.length() * factor));
+      offset.setLength(newLen);
+      camera.position.copy(controls.target).add(offset);
       controls.update();
       ev.preventDefault();
+      ev.stopImmediatePropagation();
     }
   },
-  { passive: false }
+  { capture: true, passive: false }
 );
 
 // Lights
@@ -1208,7 +1214,7 @@ function syncHtmlLabels() {
 
 function projectToScreen(pos3, width, height) {
   const v = pos3.clone().project(camera);
-  if (v.z < -1 || v.z > 1) return null;
+  if (!isFinite(v.x) || !isFinite(v.y) || !isFinite(v.z) || v.z < -1 || v.z > 1) return null;
   return {
     x: (v.x * 0.5 + 0.5) * width,
     y: (-v.y * 0.5 + 0.5) * height,
@@ -3276,9 +3282,11 @@ function handleResize() {
   if (w <= 0 || h <= 0) return;
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.setSize(w, h, false);
 }
 
+window.addEventListener("resize", handleResize);
 new ResizeObserver(handleResize).observe(container);
 
 let clockStart = performance.now();
