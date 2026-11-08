@@ -169,6 +169,8 @@ def main(argv=None) -> int:
     s = sub.add_parser("run", help="bauen + vorbereiten + prüfen + rendern")
     s.add_argument("project")
     s.add_argument("--orient", default=None)
+    s.add_argument("--also-assembly", default="", help="Bei Erfolg diese Baugruppe direkt mitbauen")
+    s.add_argument("--clear-feedback", action="store_true", help="Bei Erfolg erledigtes 3D-UI-Feedback löschen")
     s = sub.add_parser("schablone", aliases=["stencil"],
                        help="dünnen Passungs-Testdruck (Scheibe) aus einem Projekt erzeugen")
     s.add_argument("project")
@@ -256,7 +258,7 @@ def main(argv=None) -> int:
         elif a.cmd == "prepare":
             _out(pipeline.prepare(a.project, a.orient))
         elif a.cmd == "run":
-            _out(pipeline.run_all(a.project, a.orient))
+            _out(pipeline.run_all(a.project, a.orient, also_assembly=a.also_assembly, clear_feedback=a.clear_feedback))
         elif a.cmd in ("schablone", "stencil"):
             _out(pipeline.new_stencil(a.project, a.z, a.hoehe))
         elif a.cmd in ("baugruppe", "assembly"):

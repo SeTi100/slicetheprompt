@@ -83,7 +83,7 @@ def hole_cut(d: float, depth: float, material: str | None = None):
 
 
 def screw_hole_cut(size: str, depth: float, material: str | None = None):
-    """Durchgangsloch für metrische Schraube, z. B. 'M3'."""
+    """Durchgangsloch für Schraube: 'M2', 'M2.5', 'M3', 'M4', 'M5', 'M6', 'M8', 'M10', 'M12' sowie Stativgewinde '1/4' ('1/4-20') und '3/8' ('3/8-16')."""
     return hole_cut(SCREW_CLEARANCE[size], depth, material)
 
 
@@ -95,7 +95,7 @@ def fit_hole_cut(d_part: float, depth: float, press: bool = False, material: str
 
 
 def counterbore_cut(size: str, depth: float, head_depth: float | None = None, material: str | None = None):
-    """Schraubloch mit Senkung für Zylinderkopf; Kopf oben (bei z = depth)."""
+    """Schraubloch mit Senkung für Zylinderkopf (Grössen M2..M12, '1/4', '3/8'); Kopf oben (bei z = depth)."""
     hd = head_depth if head_depth is not None else HEAD_H[size] + 0.3
     head = Pos(0, 0, depth - hd) * Cylinder(hole_d(HEAD_D[size] + 0.6, material) / 2, hd, align=_C)
     return screw_hole_cut(size, depth, material) + head
@@ -111,7 +111,7 @@ def countersink_cut(screw_d: float, head_d: float, depth: float, material: str |
 
 
 def nut_trap_cut(size: str, depth: float | None = None, material: str | None = None):
-    """Sechskant-Mutternfalle (Schlüsselweite + Spiel), von z = 0 nach oben."""
+    """Sechskant-Mutternfalle (Schlüsselweite + Spiel, Grössen M2..M12, '1/4', '3/8'), von z = 0 nach oben."""
     flats, h = NUT[size]
     flats = flats + 2 * tol(material)["clearance"]
     r = flats / math.sqrt(3)        # Umkreisradius des Sechsecks

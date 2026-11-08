@@ -32,6 +32,7 @@ cfs_status/filament_plan → slice → Nutzer bestätigt mit 'drucken' → uploa
 Mehrfarbig: in model.py `bodies = {name: Körper}`, Spule je Körper in spec.yaml → filament.
 Baugruppe (mehrere Teil-Projekte zusammen ansehen/prüfen): assembly_new → assembly.py → build_assembly.
 Regeln und Toleranzen: config/printer.yaml (und calibration.yaml). Nie ohne ausdrückliche Bestätigung drucken.
+3D-Feedback (SliceThePrompt UI): get_ui_feedback liefert bei Baugruppen direkt target_project und part_print_xyz in Drucklage; Umbau in einem Schritt mit build_and_check(project, also_assembly=..., clear_feedback=True).
 """
 
 server = _Server("slicetheprompt", instructions=INSTRUCTIONS)
