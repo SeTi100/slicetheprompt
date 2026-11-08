@@ -64,7 +64,7 @@ L, B, H = 40.0, 30.0, 10.0
 part = Box(L, B, H, align=C)
 part = bottom_chamfer(part)
 
-# ---- Selbstprüfung: Name -> (Ist, Soll, Toleranz) ----
+# ---- Selbstprüfung: Name -> (Ist, Soll, Toleranz) – immer aus obigen Parametern berechnen, nie Zahlen hartcodieren! ----
 bb = part.bounding_box()
 checks = {{
     "Länge": (bb.size.X, L, 0.01),
@@ -98,10 +98,10 @@ def new_project(name: str, material: str = "pla", beschreibung: str = "") -> dic
     (d / "out").mkdir(parents=True)
     (d / "spec.yaml").write_text(
         SPEC_TEMPLATE.format(name=slug, beschreibung=beschreibung.replace('"', "'"), material=material.lower()),
-        encoding="utf-8")
+        encoding="utf-8", newline="\n")
     (d / "model.py").write_text(
         MODEL_TEMPLATE.format(name=slug, beschreibung=beschreibung or name, material=material.lower()),
-        encoding="utf-8")
+        encoding="utf-8", newline="\n")
     return {"project": d.name, "path": str(d), "spec": str(d / "spec.yaml"), "model": str(d / "model.py")}
 
 
@@ -413,11 +413,42 @@ def render(project: str, which: str = "print", colors: dict | None = None) -> di
     return {"png": str(png)}
 
 
+def find_assemblies_for_part(part_project: str) -> list[str]:
+    """Findet alle Baugruppen unter PROJECTS_DIR, die `part_project` verwenden."""
+    from .assembly import ASSEMBLY_FILE, is_assembly
+    found: list[str] = []
+    if not PROJECTS_DIR.exists():
+        return found
+    short_name = part_project[11:] if len(part_project) > 11 and part_project[4] == "-" and part_project[7] == "-" else part_project
+    for sub in sorted(PROJECTS_DIR.iterdir()):
+        if not sub.is_dir() or not is_assembly(sub) or (sub / "model.py").exists():
+            continue
+        aj_path = sub / "out" / "assembly.json"
+        if aj_path.exists():
+            try:
+                aj = json.loads(aj_path.read_text(encoding="utf-8"))
+                if any(isinstance(t, dict) and t.get("projekt") == part_project for t in (aj.get("teile") or [])):
+                    found.append(sub.name)
+                    continue
+            except Exception:
+                pass
+        try:
+            txt = (sub / ASSEMBLY_FILE).read_text(encoding="utf-8")
+            if part_project in txt or (short_name and short_name in txt):
+                found.append(sub.name)
+        except Exception:
+            pass
+    return found
+
+
 def run_all(project: str, orientation: str | None = None, reason: str = "build_and_check",
-            also_assembly: str = "", clear_feedback: bool = False) -> dict:
-    """Bauen, (optional) Lage wählen, prüfen, rendern – ein Durchlauf.
-    Optional bei Erfolg (`passed=True`): Baugruppe `also_assembly` direkt mitbauen und UI-Feedback löschen."""
+            also_assembly: str = "auto", clear_feedback: bool = True,
+            params: dict[str, float | int] | None = None,
+            spec_updates: dict | None = None) -> dict:
+    """Bauen, (optional) Parameter/Spec vorab setzen, Lage wählen, prüfen, rendern – ein Durchlauf.
+    Bei Erfolg (`passed=True`): Baugruppen automatisch mitbauen (`also_assembly='auto'`) und UI-Feedback löschen."""
     from .assembly import build_assembly, is_assembly
+    from .config import write_yaml
     d = project_dir(project)
     if is_assembly(d) and not (d / "model.py").exists():
         res = {"stage": "baugruppe", **build_assembly(project)}
@@ -425,6 +456,15 @@ def run_all(project: str, orientation: str | None = None, reason: str = "build_a
             from .ui_server import clear_project_feedback
             res["feedback_cleared"] = clear_project_feedback(d)
         return res
+    if params:
+        from . import params as params_mod
+        params_mod.update_params(d / "model.py", params)
+        if reason == "build_and_check":
+            reason = "param_update"
+    if spec_updates and isinstance(spec_updates, dict):
+        sp = load_spec(d)
+        sp.update(spec_updates)
+        write_yaml(d / "spec.yaml", sp)
     b = build(project)
     if not b.get("ok"):
         return {"stage": "build", **b}
@@ -438,14 +478,23 @@ def run_all(project: str, orientation: str | None = None, reason: str = "build_a
            "orientation": p["orientation"], "report": _short(r), "png": img["png"],
            "version": snap["version"]}
     if r.get("passed"):
-        if also_assembly:
-            asm_res = build_assembly(also_assembly)
-            out["assembly"] = asm_res
+        if also_assembly in ("none", "false", "0", "nein"):
+            asms: list[str] = []
+        elif also_assembly and also_assembly != "auto":
+            asms = [also_assembly]
+        else:
+            asms = find_assemblies_for_part(d.name)
+        if asms:
+            out["assemblies"] = {}
+            for a_name in asms:
+                asm_res = build_assembly(a_name)
+                out["assemblies"][a_name] = asm_res
+            out["assembly"] = next(iter(out["assemblies"].values()))
         if clear_feedback:
             from .ui_server import clear_project_feedback
             cleared = [clear_project_feedback(d)]
-            if also_assembly:
-                cleared.append(clear_project_feedback(project_dir(also_assembly)))
+            for a_name in asms:
+                cleared.append(clear_project_feedback(project_dir(a_name)))
             out["feedback_cleared"] = cleared
     return out
 
@@ -525,7 +574,7 @@ def new_stencil(project: str, z: float | list[float] = 0.0, hoehe: float = 2.0) 
         d = Path(p["path"])
     (d / "model.py").write_text(
         STENCIL_MODEL.format(quelle=src.name, material=material, z=zs if len(zs) > 1 else zs[0], hoehe=hoehe),
-        encoding="utf-8")
+        encoding="utf-8", newline="\n")
     fil = spec.get("filament")
     st_spec = {
         "name": d.name[11:],

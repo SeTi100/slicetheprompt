@@ -124,14 +124,15 @@ def project_list() -> dict:
 
 @server.tool()
 def build_and_check(project: str, orientation: str = "wie modelliert",
-                    also_assembly: str = "", clear_feedback: bool = False) -> dict:
-    """model.py ausführen (build123d), STEP+STL exportieren, Drucklage festlegen, gegen
-    printer.yaml und spec.yaml prüfen und out/render.png erzeugen.
-    orientation: 'wie modelliert' (Standard), 'auto' oder 'kopfüber (X 180°)', 'X +90°', 'X -90°', 'Y +90°', 'Y -90°'.
-    also_assembly: optionaler Baugruppen-Projektname, der bei passed=True sofort mitgebaut wird.
-    clear_feedback: bei passed=True erledigtes 3D-UI-Feedback automatisch löschen.
+                    also_assembly: str = "auto", clear_feedback: bool = True,
+                    params: dict[str, float] | None = None,
+                    spec: dict | None = None) -> dict:
+    """Optional `params` ({"NAME": Wert}) in model.py und `spec` in spec.yaml setzen, dann model.py
+    ausführen (build123d), STEP+STL exportieren, gegen printer.yaml und spec.yaml prüfen und out/render.png erzeugen.
+    Bei passed=True werden automatisch alle Baugruppen mitgebaut, die das Teil enthalten (also_assembly='auto',
+    abschaltbar mit 'none'), und erledigtes 3D-UI-Feedback gelöscht (clear_feedback=True).
     Danach IMMER das PNG mit dem Read-Tool ansehen."""
-    return _worker("run_all", project, orientation, "build_and_check", also_assembly, clear_feedback)
+    return _worker("run_all", project, orientation, "build_and_check", also_assembly, clear_feedback, params, spec)
 
 
 @server.tool()

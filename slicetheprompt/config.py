@@ -55,7 +55,7 @@ def material_cfg(cfg: dict, material: str | None) -> dict:
 
 def write_yaml(path: Path, data: dict, header: str = "") -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
         if header:
             for line in header.strip().splitlines():
                 f.write(f"# {line}\n")

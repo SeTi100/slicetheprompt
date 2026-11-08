@@ -123,15 +123,19 @@ Der Nutzer ist kein CAD-Profi: erkläre Masse und Annahmen in Alltagssprache.
   `get_ui_feedback` enthält die Pose (`pose`) und bei bewegten Teilen `gelenkwerte`; Koordinaten sind
   Baugruppen-Koordinaten.
 
-## Fast-Path für 3D-UI-Feedback (Pflichtablauf ohne Suchschleifen)
-Wenn der Nutzer 3D-Feedback aus `SliceThePrompt` umsetzen lässt (`get_ui_feedback`), gilt dieser strikte 5-Schritte-Fast-Path:
-1. **Ein Aufruf für Kontext + Bild:** `get_ui_feedback(project="<name>")` aufrufen und `out/ui_feedback.png` mit `read_file` ansehen.
-   - Bei **Baugruppen** liefert `get_ui_feedback` in jeder Annotation bereits fertig rücktransformierte Koordinaten in der Drucklage des Einzelteils (`target_project`, `target_model_py`, `target_spec_yaml`, `part_print_xyz`, `part_bbox_print`, `part_print_delta_mm`). **Keine eigene 4×4-Matrix-Inversion rechnen!**
-   - Beachte nur eine eventuelle Drehung/Spiegelung in den letzten Zeilen von `model.py` (z. B. `part = mirror(Pos(0,0,H) * k)`), falls du vor dieser Zeile schneidest – oder schneide direkt am fertigen `part` in Drucklage (vor `bottom_chamfer`).
-2. **Direkt Ziel-Dateien lesen:** Nur `target_model_py` (`model.py`) und `target_spec_yaml` (`spec.yaml`) lesen. **Verboten:** `git log`, `git grep`, `find` oder `Get-ChildItem` nach alten Spezifikationen/TODOs im Repo.
-3. **Kleine Edits:** In `edit_file` unter Windows (CRLF) immer kurze Zielblöcke (1–4 Zeilen Kontext) verwenden. Ist eine Box-Markierung viel grösser als das Feature (z. B. 49×28 mm Box für ein einzelnes Loch) und kollidiert die Box-Mitte mit einer Nut/Rippe, wähle die freieste Stelle innerhalb der Box (oder frage in 1 Satz nach, statt lange zu grübeln).
-4. **Kombi-Build in einem Aufruf:** `build_and_check(project="<teil>", also_assembly="<baugruppe>", clear_feedback=True)` baut das Teil, aktualisiert bei `passed=True` sofort die Baugruppe und löscht das erledigte Feedback in **einem** Schritt.
-5. **Sichtkontrolle & Kurzbericht:** `out/render.png` (Teil und ggf. Baugruppe) mit `read_file` ansehen und Ergebnis knapp melden.
+## Fast-Path für 3D-UI-Feedback (Ziel: 3 Runden, keine Suchschleifen)
+Wenn der Nutzer 3D-Feedback aus `SliceThePrompt` umsetzen lässt (`get_ui_feedback`), gilt dieser strikte 3-Runden-Ablauf:
+1. **Runde 1 – Kontext + Bild in EINEM parallelen Schritt:**
+   Rufe `get_ui_feedback` und `read_file("projects/<projekt>/out/ui_feedback.png")` **gleichzeitig im selben Schritt** auf (Schema-Datei vorher NICHT lesen!):
+   - `call_mcp_tool`: `ServerName="slicetheprompt"`, `ToolName="get_ui_feedback"`, `Arguments={"project": "<projekt>"}`
+   - `get_ui_feedback` liefert `model_py_numbered` (kompletter Code mit Zeilennummern), `params`, `spec`, `used_in_assemblies` sowie bei Baugruppen `target_project` und `part_print_xyz` (fertig in Einzelteil-Drucklage!) direkt mit.
+   - **Verboten:** `model.py` oder `spec.yaml` nochmal extra mit `read_file` öffnen, `project_list` aufrufen oder mit `git log`/`git grep`/`find` im Repo suchen.
+2. **Runde 2 – Änderung + Auto-Build:**
+   - **Fall A (reine Parameter-/Maßänderung):** Kein `edit_file` nötig! Direkt in einem Aufruf ändern, Teil + alle zugehörigen Baugruppen bauen und Feedback löschen:
+     `call_mcp_tool`: `ServerName="slicetheprompt"`, `ToolName="build_and_check"`, `Arguments={"project": "<teil>", "params": {"PARAM_NAME": 16.0}, "spec": {"bbox": [x, y, z]}}`
+   - **Fall B (Geometrie-/Code-Änderung):** `edit_file` auf `model.py` (Dateien sind LF-normiert; kurze Zielblöcke nutzen; Prüf-Geometrie in `checks` immer aus Parametern ableiten, nie Zahlen hartcodieren!) und `build_and_check(project="<teil>")` aufrufen (`also_assembly="auto"` und `clear_feedback=True` sind Standard!).
+3. **Runde 3 – Sichtkontrolle & Kurzbericht:**
+   `out/render.png` des Teils (und bei Kollisionen/Lageänderungen der Baugruppe) mit `read_file` ansehen und Ergebnis knapp melden.
 - **Kein Task-Polling:** Bei `run_command` für Tests `WaitMsBeforeAsync: 10000` nutzen. Läuft ein Befehl im Hintergrund, Turn beenden (System weckt automatisch auf) – nie `manage_task(status)` in einer Schleife aufrufen.
 
 ## Mehrfarbig

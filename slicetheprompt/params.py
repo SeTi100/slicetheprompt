@@ -205,7 +205,7 @@ def update_params(model_path: Path | str, updates: dict[str, float | int]) -> li
             del lines[s_line + 1 : e_line + 1]
 
     # Write updated source code
-    path.write_text("".join(lines), encoding="utf-8")
+    path.write_text("".join(lines).replace("\r\n", "\n"), encoding="utf-8", newline="\n")
 
     # Return freshly extracted parameters
     return extract_params(path)

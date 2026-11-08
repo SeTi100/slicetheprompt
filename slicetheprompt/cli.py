@@ -169,8 +169,10 @@ def main(argv=None) -> int:
     s = sub.add_parser("run", help="bauen + vorbereiten + prüfen + rendern")
     s.add_argument("project")
     s.add_argument("--orient", default=None)
-    s.add_argument("--also-assembly", default="", help="Bei Erfolg diese Baugruppe direkt mitbauen")
-    s.add_argument("--clear-feedback", action="store_true", help="Bei Erfolg erledigtes 3D-UI-Feedback löschen")
+    s.add_argument("--also-assembly", default="auto", help="Bei Erfolg diese Baugruppe direkt mitbauen (oder 'auto' / 'none')")
+    s.add_argument("--clear-feedback", action="store_true", default=True, help="Bei Erfolg erledigtes 3D-UI-Feedback löschen (Standard)")
+    s.add_argument("--no-clear-feedback", dest="clear_feedback", action="store_false", help="UI-Feedback nicht löschen")
+    s.add_argument("--param", nargs="*", default=None, help="Parameter in model.py überschreiben, z. B. NAME=16")
     s = sub.add_parser("schablone", aliases=["stencil"],
                        help="dünnen Passungs-Testdruck (Scheibe) aus einem Projekt erzeugen")
     s.add_argument("project")
@@ -258,7 +260,19 @@ def main(argv=None) -> int:
         elif a.cmd == "prepare":
             _out(pipeline.prepare(a.project, a.orient))
         elif a.cmd == "run":
-            _out(pipeline.run_all(a.project, a.orient, also_assembly=a.also_assembly, clear_feedback=a.clear_feedback))
+            params = None
+            if a.param:
+                params = {}
+                for item in a.param:
+                    if "=" in item:
+                        k, v = item.split("=", 1)
+                        v_clean = v.strip().replace(",", ".")
+                        try:
+                            params[k.strip()] = float(v_clean) if "." in v_clean else int(v_clean)
+                        except ValueError:
+                            params[k.strip()] = v.strip()
+            _out(pipeline.run_all(a.project, a.orient, also_assembly=a.also_assembly,
+                                  clear_feedback=a.clear_feedback, params=params))
         elif a.cmd in ("schablone", "stencil"):
             _out(pipeline.new_stencil(a.project, a.z, a.hoehe))
         elif a.cmd in ("baugruppe", "assembly"):

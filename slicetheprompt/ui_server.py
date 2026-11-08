@@ -74,6 +74,7 @@ def _resolve_project_in_root(name: str, root: Path) -> Path:
         d.resolve() for d in root_res.glob(f"*{clean}*")
         if d.is_dir() and d.resolve().is_relative_to(root_res)
     )
+
     if len(matches) == 1:
         return matches[0]
     if len(matches) > 1:
@@ -107,6 +108,7 @@ def list_projects_summary(projects_root: Path = PROJECTS_DIR) -> list[dict[str, 
             or bi.get("size_mm")
             or (versions[-1].get("size_mm") if versions else None)
         )
+    
         bodies = [b["name"] for b in (bi.get("bodies") or []) if isinstance(b, dict) and "name" in b]
         mtimes = [
             p.stat().st_mtime
@@ -394,6 +396,29 @@ def clear_project_feedback(d: Path) -> dict[str, Any]:
     return {"ok": True, "project": d.name, "removed": removed}
 
 
+def _find_assemblies_using_part(part_project: str, projects_root: Path) -> list[str]:
+    """Findet alle Baugruppen unter projects_root, die `part_project` in TEILE verwenden."""
+    found: list[str] = []
+    if not projects_root.exists():
+        return found
+    short_name = part_project[11:] if len(part_project) > 11 and part_project[4] == "-" and part_project[7] == "-" else part_project
+    for sub in sorted(projects_root.iterdir()):
+        if not sub.is_dir() or not (sub / asm_mod.ASSEMBLY_FILE).exists():
+            continue
+        aj = _read_json(sub / "out" / "assembly.json") or {}
+        teile = aj.get("teile") or []
+        if any(isinstance(t, dict) and t.get("projekt") == part_project for t in teile):
+            found.append(sub.name)
+            continue
+        try:
+            txt = (sub / asm_mod.ASSEMBLY_FILE).read_text(encoding="utf-8")
+            if part_project in txt or (short_name and short_name in txt):
+                found.append(sub.name)
+        except Exception:
+            pass
+    return found
+
+
 def _enrich_feedback_for_agent(d: Path, data: dict[str, Any]) -> None:
     """Ergänzt UI-Feedback um Zielprojekt-Pfade und transformiert Baugruppen-Koordinaten in Drucklage."""
     asm_json_path = d / "out" / "assembly.json"
@@ -496,11 +521,39 @@ def _enrich_feedback_for_agent(d: Path, data: dict[str, Any]) -> None:
         data["target_model_py"] = str((d / "model.py").resolve())
         data["target_spec_yaml"] = str((d / "spec.yaml").resolve())
 
+    target_dir: Path | None = None
+    if data.get("project_kind") == "part":
+        target_dir = d
+        data["used_in_assemblies"] = _find_assemblies_using_part(d.name, d.parent)
+    elif data.get("project_kind") == "assembly":
+        data["used_in_assemblies"] = [d.name]
+        for ann in (data.get("annotations") or []):
+            if isinstance(ann, dict) and ann.get("target_project"):
+                target_dir = d.parent / ann["target_project"]
+                data.setdefault("target_project", ann["target_project"])
+                if "target_model_py" not in data and (target_dir / "model.py").exists():
+                    data["target_model_py"] = str((target_dir / "model.py").resolve())
+                if "target_spec_yaml" not in data and (target_dir / "spec.yaml").exists():
+                    data["target_spec_yaml"] = str((target_dir / "spec.yaml").resolve())
+                break
+
+    if target_dir and (target_dir / "model.py").exists():
+        try:
+            src = (target_dir / "model.py").read_text(encoding="utf-8")
+            data["model_py_numbered"] = "\n".join(f"{i:3d}: {line}" for i, line in enumerate(src.splitlines(), 1))
+        except Exception:
+            pass
+        try:
+            data["params"] = params_mod.extract_params(target_dir / "model.py")
+        except Exception:
+            data["params"] = []
+        data["spec"] = _read_yaml(target_dir / "spec.yaml")
+
     data["hint"] = (
-        "Sieh dir `screenshot` mit read_file an. "
-        "Bei Baugruppen enthalten die Annotationen bereits `target_project`, `part_print_xyz` und `part_bbox_print` "
-        "(exakt umgerechnet in die Drucklage out/model.step des Einzelteils – keine eigene Matrix-Inversion nötig!). "
-        "Nutze nach dem Editieren `build_and_check(project=..., also_assembly=..., clear_feedback=True)`."
+        "Alles in einem Schritt geliefert (`model_py_numbered`, `params`, `spec`, `used_in_assemblies` sowie bei Baugruppen `part_print_xyz`). "
+        "Lies `model.py`/`spec.yaml` NICHT nochmal extra mit read_file! "
+        "Bei reiner Maßänderung direkt `build_and_check(project=..., params={...}, spec={...})` aufrufen – "
+        "baut automatisch alle Baugruppen mit und löscht das Feedback."
     )
 
 
@@ -528,12 +581,12 @@ def read_project_feedback(project: str = "", projects_root: Path = PROJECTS_DIR)
     data["ok"] = True
     data["has_feedback"] = True
     _enrich_feedback_for_agent(d, data)
-    (
-        # Hinweis wird in _enrich_feedback_for_agent gesetzt
 
 
 
-    )
+
+
+
     return data
 
 
@@ -582,6 +635,7 @@ def _projects_watch_signature(projects_root: Path) -> dict[str, float]:
                 out / "print.stl",
                 out / "ui_feedback.json",
             )
+        
             if p.exists()
         ]
         if mtimes:

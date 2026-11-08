@@ -1,4 +1,10 @@
-* text=auto
-*.stl binary
-*.3mf binary
-*.step text
+* text=auto eol=lf
+*.py text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.js text eol=lf
+*.mjs text eol=lf
+*.html text eol=lf
+*.css text eol=lf
