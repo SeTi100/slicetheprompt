@@ -139,13 +139,61 @@ export function moveJoints(joints, disp) {
   });
 }
 
+// ---------------------------------------------------------------- Auswahl → fest / mitfahrend
+/**
+ * Was bewegt sich, wenn `selected` gewählt ist? Träger-Baum vom Boden aus (Breitensuche über die
+ * Gelenke). Ein nicht gewähltes Teil fährt starr auf seinem Träger mit, wenn in seiner Träger-Kette
+ * ein gewähltes Teil vorkommt (Knopf auf der bewegten Schale); sonst steht es in der Welt still.
+ * Rückgabe {frozen: Set, locks: [[Teil, Träger], …]}.
+ */
+export function freezePlan(kin, selected) {
+  const ground = new Set(kin.gelenke.filter((j) => j.typ === "boden").map((j) => j.a));
+  const adj = {};
+  for (const j of kin.gelenke) {
+    if (j.typ === "getriebe" || j.typ === "boden" || !j.b) continue;
+    (adj[j.a] ||= []).push(j.b);
+    (adj[j.b] ||= []).push(j.a);
+  }
+  const parent = {};
+  const seen = new Set(ground);
+  const queue = [...ground];
+  while (queue.length) {
+    const x = queue.shift();
+    for (const y of adj[x] || []) {
+      if (seen.has(y)) continue;
+      seen.add(y);
+      parent[y] = x;
+      queue.push(y);
+    }
+  }
+  const frozen = new Set(), locks = [];
+  for (const b of kin.koerper) {
+    if (selected.has(b) || ground.has(b)) continue;
+    if (!(b in parent)) {
+      frozen.add(b);
+      continue;
+    }
+    let p = parent[b], carried = false;
+    while (p !== undefined && !ground.has(p)) {
+      if (selected.has(p)) {
+        carried = true;
+        break;
+      }
+      p = parent[p];
+    }
+    if (carried) locks.push([b, parent[b]]);
+    else frozen.add(b);
+  }
+  return { frozen, locks, parent };
+}
+
 // ---------------------------------------------------------------- Mechanismus
 export class Mechanism {
   /**
    * kin: assembly.json → kinematik; world: {Körper: 4×4 aktuelle Welt-Lage}; frozen: Set der Körper,
    * die sich nicht bewegen dürfen (zusätzlich zu Boden-Gelenken).
    */
-  constructor(kin, world, frozen = new Set()) {
+  constructor(kin, world, frozen = new Set(), locks = []) {
     this.kin = kin;
     this.bodies = kin.koerper.filter((b) => world[b]);
     this.world0 = Object.fromEntries(Object.entries(world).map(([k, v]) => [k, v.slice()]));
@@ -157,10 +205,15 @@ export class Mechanism {
       this.c0[b] = m4point(disp[b], kin.zentren[b] || [0, 0, 0]);
     }
     this.joints = moveJoints(kin.gelenke, disp).filter((j) => j.typ === "getriebe" || (this.bodies.includes(j.a) && (!j.b || this.bodies.includes(j.b))));
+    // Mitfahrer: nicht gewählte Teile sitzen starr auf ihrem Träger – sie bewegen sich genau wie er
+    // und sind keine eigenen Unbekannten (kleines, gut konditioniertes Gleichungssystem)
+    this.carrier = {};
+    for (const [b, p] of locks) if (this.bodies.includes(b) && this.bodies.includes(p)) this.carrier[b] = p;
     this.byName = Object.fromEntries(this.joints.map((j) => [j.name, j]));
     const ground = new Set(this.joints.filter((j) => j.typ === "boden").map((j) => j.a));
     this.fixed = new Set([...ground, ...frozen]);
-    this.movable = this.bodies.filter((b) => !this.fixed.has(b));
+    this.movable = this.bodies.filter((b) => !this.fixed.has(b) && !(b in this.carrier));
+    this.carried = Object.keys(this.carrier);
     this.R = {};
     this.c = {};
     for (const b of this.bodies) {
@@ -298,7 +351,22 @@ export class Mechanism {
       R[b] = mm(rotvec([x[6 * i], x[6 * i + 1], x[6 * i + 2]]), this.R[b]);
       c[b] = add(this.c[b], [x[6 * i + 3], x[6 * i + 4], x[6 * i + 5]]);
     });
+    this._follow(R, c);
     return { R, c };
+  }
+
+  // Mitfahrer übernehmen die Bewegung ihres Trägers: gleiche Drehung, Bezugspunkt starr mitgeführt
+  _follow(R, c) {
+    const done = new Set();
+    const resolve = (b) => {
+      if (done.has(b)) return;
+      const p = this.carrier[b];
+      if (p in this.carrier) resolve(p);
+      R[b] = R[p];
+      c[b] = add(c[p], mv(R[p], sub(this.c0[b], this.c0[p])));
+      done.add(b);
+    };
+    for (const b of this.carried) resolve(b);
   }
 
   _jacobian(f, n, eps = 1e-6) {

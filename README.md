@@ -156,7 +156,7 @@ prüft sie exakt. Passt eine Pose aus `platzierung()` nicht zu den Gelenken, ste
 
 | | |
 | --- | --- |
-| <img src="docs/images/12-bewegen.webp" alt="Kurbeltrieb im Studio, Kurbel auf 125° gedreht"> | **✥ Bewegen (Taste 6).** Teile anklicken (Umschalt = mehrere) und ziehen oder am Regler drehen: Alles Nicht-Gewählte bleibt fest, die Auswahl folgt nur ihren Gelenken, die Anzeige nennt die verbleibenden Freiheitsgrade. Stösst ein bewegtes Teil an, bleibt es am Kontakt stehen („Anschlag: Knopf 1 ↔ Okularklemme“); aufliegende Flächen dürfen gleiten. „Exakt prüfen“ rechnet die bewegte Stellung mit dem CAD-Kern nach. Hier das Beispiel `beispiel-kurbeltrieb`: Kurbel auf 125°, Kolbenweg −33,75 mm – genau der Wert aus der Kurbeltrieb-Formel, ohne dass sie irgendwo steht. |
+| <img src="docs/images/12-bewegen.webp" alt="Kurbeltrieb im Studio, Kurbel auf 125° gedreht"> | **✥ Bewegen (Taste 6).** Teile anklicken (Umschalt = mehrere) und ziehen oder am Regler drehen: Die Auswahl folgt nur ihren Gelenken, Nicht-Gewähltes bleibt fest – sitzt es auf einem gewählten Teil (Knopf auf der Schale), fährt es starr mit; die Anzeige nennt die verbleibenden Freiheitsgrade. Stösst ein bewegtes Teil an, bleibt es am Kontakt stehen („Anschlag: Knopf 1 ↔ Okularklemme“); aufliegende Flächen dürfen gleiten. „Exakt prüfen“ rechnet die bewegte Stellung mit dem CAD-Kern nach. Hier das Beispiel `beispiel-kurbeltrieb`: Kurbel auf 125°, Kolbenweg −33,75 mm – genau der Wert aus der Kurbeltrieb-Formel, ohne dass sie irgendwo steht. |
 
 ```powershell
 uv run slicetheprompt run beispiel-kurbeltrieb-rahmen     # … -kurbel, -pleuel, -kolben ebenso

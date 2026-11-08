@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "/vendor/OrbitControls.js";
 import { STLLoader } from "/vendor/STLLoader.js";
-import { Mechanism } from "/kinematics.js";
+import { Mechanism, freezePlan } from "/kinematics.js";
 import { buildBVH, meshesPenetrate } from "/collide.js";
 
 // ============================================================================
@@ -2857,16 +2857,22 @@ function kinResetToPose() {
   S.kin.blocked = null;
 }
 
-function kinSkipPair(a, b) {
-  const aj = S.state.assembly;
+function kinPairMatches(pairs, a, b) {
   const info = S.kin.info;
   const names = (x) => [x, info[x]?.teil].filter(Boolean);
-  const pairs = [...(aj.kontakt || []).map((k) => k.paar), ...(aj.ignorieren || [])];
-  for (const [p, q] of pairs) {
-    const m = (pat, x) => names(x).some((n) => globMatch(pat, n));
-    if ((m(p, a) && m(q, b)) || (m(p, b) && m(q, a))) return true;
-  }
-  return false;
+  const m = (pat, x) => names(x).some((n) => globMatch(pat, n));
+  return pairs.find(([p, q]) => (m(p, a) && m(q, b)) || (m(p, b) && m(q, a)));
+}
+
+// IGNORIEREN-Paare prüft das Bewegen nicht
+function kinSkipPair(a, b) {
+  return !!kinPairMatches(S.state.assembly.ignorieren || [], a, b);
+}
+
+// Toleranz je Paar: erlaubter Klemmkontakt (KONTAKT) oder 0,02 mm
+function kinEps(a, b) {
+  const k = (S.state.assembly.kontakt || []).find((x) => kinPairMatches([x.paar], a, b));
+  return k ? Math.max(0.02, Number(k.tiefe_mm) || 0) : 0.02;
 }
 
 async function kinBVH(url) {
@@ -2884,18 +2890,14 @@ async function kinSession() {
   const kin = kinData();
   if (!kin) return;
   S.kin.info = kinBodyInfo();
-  const frozen = new Set(kin.koerper.filter((b) => !S.kin.selected.has(b)));
-  S.kin.mech = new Mechanism(kin, S.kin.world, frozen);
-  // Netze für die Kollision vorbereiten und schon vorhandene Überschneidungen merken (blockieren nicht)
+  // Nicht Gewähltes steht still – ausser es sitzt auf einem gewählten Teil, dann fährt es mit
+  const plan = freezePlan(kin, S.kin.selected);
+  S.kin.riders = plan.locks.map(([b]) => b);
+  S.kin.mech = new Mechanism(kin, S.kin.world, plan.frozen, plan.locks);
+  // Netze für die Kollision vorbereiten; Überschneidungen, die schon beim Start da waren, blockieren
+  // nicht (wird erst beim ersten Treffer des Paars nachgesehen)
   for (const b of S.kin.mech.bodies) if (S.kin.info[b]) await kinBVH(S.kin.info[b].url);
-  S.kin.preexisting = new Set();
-  const mov = S.kin.mech.movable;
-  for (const a of mov) {
-    for (const b of S.kin.mech.bodies) {
-      if (a === b || (mov.includes(b) && b < a)) continue;
-      if (kinPairHit(a, b, S.kin.world[a], S.kin.world[b])) S.kin.preexisting.add([a, b].sort().join("|"));
-    }
-  }
+  S.kin.preexisting = new Map();
   renderKinPanel();
 }
 
@@ -2904,23 +2906,40 @@ function kinPairHit(a, b, Wa, Wb) {
   if (!ia || !ib) return null;
   const A = S.kin.bvh.get(ia.url), B = S.kin.bvh.get(ib.url);
   if (!A || !B) return null;
-  return meshesPenetrate(A, Wa, B, Wb, 0.02);
+  return meshesPenetrate(A, Wa, B, Wb, kinEps(a, b));
 }
 
 // Kollision der bewegten Körper gegen alle anderen (null = frei)
 function kinCollision() {
   const m = S.kin.mech;
-  const moving = m.movable.filter((b) => m.moved(b, 1e-7));
+  const moving = [...m.movable, ...m.carried].filter((b) => m.moved(b, 1e-7));
   if (!moving.length) return null;
-  const W = {};
-  for (const b of m.bodies) W[b] = moving.includes(b) ? m.worldOf(b) : S.kin.world[b];
+  const W = {}, D = {};
+  for (const b of m.bodies) {
+    const mv = moving.includes(b);
+    W[b] = mv ? m.worldOf(b) : S.kin.world[b];
+    D[b] = mv ? m.displacement(b) : null;
+  }
+  const I = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+  const sameMotion = (a, b) => {
+    const da = D[a] || I, db = D[b] || I;
+    for (let i = 0; i < 12; i++) if (Math.abs(da[i] - db[i]) > 1e-7) return false;
+    return true;
+  };
   for (const a of moving) {
     for (const b of m.bodies) {
       if (a === b || (moving.includes(b) && b < a)) continue;
+      if (sameMotion(a, b) || kinSkipPair(a, b)) continue; // gemeinsam bewegt: keine neue Berührung möglich
       const key = [a, b].sort().join("|");
-      if (S.kin.preexisting.has(key) || kinSkipPair(a, b)) continue;
+      if (S.kin.preexisting.get(key)) continue;
       const hit = kinPairHit(a, b, W[a], W[b]);
-      if (hit) return { a, b, punkt: hit.punkt };
+      if (!hit) continue;
+      if (!S.kin.preexisting.has(key)) {
+        const before = !!kinPairHit(a, b, S.kin.world[a], S.kin.world[b]);
+        S.kin.preexisting.set(key, before);
+        if (before) continue;
+      }
+      return { a, b, punkt: hit.punkt };
     }
   }
   return null;
@@ -2930,6 +2949,7 @@ function kinCollision() {
 function kinStep(opts) {
   const m = S.kin.mech;
   if (!m) return;
+  const t0 = performance.now();
   const before = m.snapshot();
   const res = m.solve({ iters: 24, ...opts });
   let hit = kinCollision();
@@ -2951,7 +2971,7 @@ function kinStep(opts) {
       return meshesPenetrate(S.kin.bvh.get(ia.url), W(hit.a), S.kin.bvh.get(ib.url), W(hit.b), 0.002);
     };
     m.restore(before);
-    if (!fine()) {
+    if (kinEps(hit.a, hit.b) <= 0.02 && !fine()) {
       let flo = 0, fhi = lo;
       for (let k = 0; k < 10; k++) {
         const t = (flo + fhi) / 2;
@@ -2968,12 +2988,13 @@ function kinStep(opts) {
     S.kin.blocked = null;
   }
   S.kin.lastRest = res.rest;
+  S.kin.lastMs = performance.now() - t0;
   kinCommitVisual();
 }
 
 function kinCommitVisual() {
   const m = S.kin.mech;
-  for (const b of m.bodies) if (m.movable.includes(b)) S.kin.world[b] = m.worldOf(b);
+  for (const b of [...m.movable, ...m.carried]) S.kin.world[b] = m.worldOf(b);
   S.kin.moved = Object.keys(S.kin.world).some((b) =>
     S.kin.world[b].some((v, i) => Math.abs(v - S.kin.poseWorld[b][i]) > 1e-6)
   );
@@ -3042,14 +3063,17 @@ function renderKinPanel() {
     info.innerHTML = `Werkzeug <b>✥ Bewegen</b> (Taste 6): Teile anklicken (Umschalt = mehrere), dann ziehen oder Regler nutzen. Nicht gewählte Teile bleiben fest.`;
   } else {
     const dof = m ? m.dof() : "–";
-    info.innerHTML = `Ausgewählt: <b>${sel.map(escapeHtml).join(", ")}</b><br>Freiheitsgrade der Auswahl: <b>${dof}</b>${
-      dof === 0 ? " – durch Gelenke und feste Teile blockiert" : ""}`;
+    const riders = S.kin.riders || [];
+    info.innerHTML = `Ausgewählt: <b>${sel.map(escapeHtml).join(", ")}</b>${
+      riders.length ? `<br>fährt mit: ${riders.map(escapeHtml).join(", ")}` : ""}<br>Freiheitsgrade der Auswahl: <b>${dof}</b>${
+      dof === 0 ? " – durch Gelenke und feste Teile blockiert; weitere Teile der Kette mitwählen" : ""}`;
   }
   list.innerHTML = "";
   const coords = m ? m.coords() : S.kin.lastCoords || asmPose()?.gelenkwerte || {};
   for (const j of kin.gelenke) {
     if (!HAUPT_UI[j.typ]) continue;
-    const active = m && (m.movable.includes(j.a) || (j.b && m.movable.includes(j.b)));
+    const active = m && (S.kin.selected.has(j.a) || (j.b && S.kin.selected.has(j.b))) &&
+      (m.movable.includes(j.a) || (j.b && m.movable.includes(j.b)));
     const unit = HAUPT_UI[j.typ];
     const v = coords[j.name] ?? 0;
     const lo = j.grenzen ? j.grenzen[0] : unit === "°" ? Math.min(-180, v - 180) : Math.min(-50, v - 50);
@@ -3100,7 +3124,8 @@ function renderKinValues() {
   document.getElementById("btn-kin-check").disabled = !S.kin.moved;
   document.getElementById("btn-kin-reset").disabled = !S.kin.moved;
   const st = document.getElementById("kin-status");
-  st.textContent = S.kin.blocked ? `Anschlag: ${S.kin.blocked.a} ↔ ${S.kin.blocked.b}` : S.kin.moved ? "bewegt – „Exakt prüfen“ für Überschneidungen" : "";
+  const ms = S.kin.lastMs ? ` · ${Math.round(S.kin.lastMs)} ms` : "";
+  st.textContent = (S.kin.blocked ? `Anschlag: ${S.kin.blocked.a} ↔ ${S.kin.blocked.b}` : S.kin.moved ? "bewegt – „Exakt prüfen“ für Überschneidungen" : "") + (S.kin.moved ? ms : "");
   st.className = "kin-status" + (S.kin.blocked ? " blocked" : "");
 }
 

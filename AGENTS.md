@@ -118,7 +118,8 @@ Der Nutzer ist kein CAD-Profi: erkläre Masse und Annahmen in Alltagssprache.
   `{"gelenke": {"Kurbel": 90}}`. Hinweis „Pose … verletzt Gelenk …“ heisst: platzierung() und
   GELENKE passen nicht zusammen → Achse/Punkt prüfen.
 - Studio zeigt Baugruppen mit Posen-Auswahl, Explosion, Ein/Aus je Teil; mit Gelenken zusätzlich
-  **✥ Bewegen** (Auswahl folgt ihren Gelenken, Rest fest, Anschlag bei Kontakt, „Exakt prüfen“).
+  **✥ Bewegen** (Auswahl folgt ihren Gelenken, Rest fest, Teile auf einem gewählten Träger fahren mit,
+  Anschlag bei Kontakt bzw. bei der KONTAKT-Tiefe, „Exakt prüfen“).
   `get_ui_feedback` enthält die Pose (`pose`) und bei bewegten Teilen `gelenkwerte`; Koordinaten sind
   Baugruppen-Koordinaten.
 

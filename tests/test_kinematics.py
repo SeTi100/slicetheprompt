@@ -195,7 +195,7 @@ GELENKE = [Fest("Schiene"), Fest("Anschlag", "Schiene"),
 JS_TEST = r"""
 import { pathToFileURL } from "node:url";
 const ui = process.argv[2];
-const { Mechanism } = await import(pathToFileURL(ui + "/kinematics.js").href);
+const { Mechanism, freezePlan } = await import(pathToFileURL(ui + "/kinematics.js").href);
 const { buildBVH, meshesPenetrate } = await import(pathToFileURL(ui + "/collide.js").href);
 const input = JSON.parse(process.argv[3]);
 const out = {};
@@ -204,6 +204,17 @@ const m = new Mechanism(input.kin, input.world);
 out.dof = m.dof();
 out.kolben = {};
 for (const th of [30, 90, 180, 250]) out.kolben[th] = m.solve({ drives: { Kurbel: th } }).gelenke.Kolbenweg;
+// Auswahl: nur Kurbel → Pleuel fährt auf der Kurbel mit, Kolben steht → blockiert (Totpunkt meiden: 90°)
+const w90 = {};
+for (const b of input.kin.koerper) w90[b] = m.worldOf(b);
+const m90 = new Mechanism(input.kin, w90);
+m90.solve({ drives: { Kurbel: 90 } });
+for (const b of input.kin.koerper) w90[b] = m90.worldOf(b);
+const p1 = freezePlan(input.kin, new Set(["Kurbel"]));
+out.plan_kurbel = { locks: p1.locks, frozen: [...p1.frozen].sort(), dof: new Mechanism(input.kin, w90, p1.frozen, p1.locks).dof() };
+const p3 = freezePlan(input.kin, new Set(["Kurbel", "Pleuel", "Kolben"]));
+const m3 = new Mechanism(input.kin, w90, p3.frozen, p3.locks);
+out.plan_alle = { dof: m3.dof(), kolben: m3.solve({ drives: { Kurbel: 150 } }).gelenke.Kolbenweg };
 // Netze: Quader 10×10×10 auf Quader 20×20×5
 function box(x0, y0, z0, x1, y1, z1) {
   const v = [[x0,y0,z0],[x1,y0,z0],[x1,y1,z0],[x0,y1,z0],[x0,y0,z1],[x1,y0,z1],[x1,y1,z1],[x0,y1,z1]];
@@ -247,6 +258,9 @@ def test_javascript_matches_python_and_collision():
     assert out["dof"] == 1
     for th, v in out["kolben"].items():
         assert abs(v - kolbenweg_formel(float(th))) < 1e-6, (th, v)
+    assert out["plan_kurbel"]["locks"] == [["Pleuel", "Kurbel"]] and out["plan_kurbel"]["frozen"] == ["Kolben"]
+    assert out["plan_kurbel"]["dof"] == 0
+    assert out["plan_alle"]["dof"] == 1 and abs(out["plan_alle"]["kolben"] - kolbenweg_formel(150)) < 1e-6
     assert out["aufliegend"] is False and out["seitlich_buendig"] is False
     assert out["eingedrungen_01"] is True and out["eingedrungen_001"] is False
     assert out["spalt"] is False and out["durch"] is True
