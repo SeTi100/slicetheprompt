@@ -161,7 +161,7 @@ def install(client: str, force: bool = False, config: str | None = None) -> dict
         p = Path(config) if config else Path.home() / ".gemini" / "config" / "mcp_config.json"
         entry = {**entry, "timeoutSeconds": SLOW_TOOL_SEC}
         return {"client": client, "results": [_merge(p, "slicetheprompt", entry)],
-                "next": "In Antigravity: Customizations → MCP Servers → Refresh (oder neu starten)"}
+                "next": "Antigravity neu starten"}
     if client == "claude-code":
         return {"client": client, "results": [],
                 "next": "Nichts zu tun: die .mcp.json im Projekt wird von Claude Code automatisch geladen "

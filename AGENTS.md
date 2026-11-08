@@ -193,6 +193,4 @@ frischen `git clone` selbst ein (Creality Print suchen, Hi-Profile auflösen).
 Du darfst `slicetheprompt/` reparieren (z. B. Slicer-Aufruf, Profilauswahl in `config/slicer.yaml`).
 Danach `uv run python tests/test_meshcheck.py`, `uv run python tests/test_cfs_3mf.py` und (bei Änderungen
 an `lib/`) `uv run python tests/test_lib.py`, bei Baugruppen/Gelenken `tests/test_assembly.py` und
-`tests/test_kinematics.py` ausführen
-und den Nutzer informieren, dass der MCP-Server neu verbunden werden muss: Claude Code `/mcp` →
-slicetheprompt → reconnect, Codex neu starten, Antigravity **Customizations → MCP Servers → Refresh**.
+`tests/test_kinematics.py` ausführen.

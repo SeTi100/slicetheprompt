@@ -71,8 +71,7 @@ def code_stand() -> dict:
           "veraltet": now != _START_CODE}
     if st["veraltet"]:
         st["hinweis"] = ("Code wurde nach dem Serverstart geändert. Bauen/Prüfen/Rendern laufen schon mit dem neuen "
-                         "Code (eigener Prozess); für geänderte MCP-Tools den Server neu verbinden "
-                         "(Claude Code: /mcp → slicetheprompt → reconnect).")
+                         "Code (eigener Prozess).")
     return st
 
 
