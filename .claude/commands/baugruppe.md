@@ -16,6 +16,9 @@ Auftrag: $ARGUMENTS
    - `platzierung(p)` mit `pos`/`rot`/`spiegel` (bei `anzahl > 1` eine Liste),
    - `POSEN` mit den Endlagen und der Mitte jedes Verstellwegs,
    - `geister(p)` für Bezugskörper, `KONTAKT` nur für gewollten Klemmkontakt.
+   - Bewegt sich etwas (Schlitten, Kurbel, Knopf auf Gewinde): `GELENKE` statt nur Posen –
+     `Fest(boden)`, dann je Teil ein Gelenk zu seinem Träger (`Drehung`, `Schiebung`, `Schraube` …)
+     mit `grenzen`; keine Formeln. Posen dürfen Gelenkwerte sein (`{"gelenke": {"Kurbel": 90}}`).
    Fehlt ein Mass für die Lage (z. B. Abstand zwischen zwei Teilen), **einmal** gebündelt fragen.
 4. `build_assembly(project)` aufrufen, `out/render.png` mit Read ansehen. Stimmt die Lage eines Teils
    offensichtlich nicht (schwebt, steckt quer), Platzierung korrigieren (höchstens 5 Runden).

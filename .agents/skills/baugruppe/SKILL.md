@@ -20,6 +20,9 @@ description: >-
    - `POSEN`: Endlagen und Mitte jedes Verstellwegs.
    - `geister(p)` → `Geist(form, lage=…, farbe=…, folgt="Teil")` für Bezugskörper (Handy, Okular, Schrauben).
    - `KONTAKT = {("Teil", "Geist"): 0.3}` nur für gewollten Klemmkontakt.
+   - Bewegt sich etwas (Schlitten, Kurbel, Knopf auf Gewinde): `GELENKE` statt nur Posen –
+     `Fest(boden)`, dann je Teil ein Gelenk zu seinem Träger (`Drehung`, `Schiebung`, `Schraube` …)
+     mit `grenzen`; keine Formeln. Posen dürfen Gelenkwerte sein (`{"gelenke": {"Kurbel": 90}}`).
    Fehlt ein Mass für die Lage, **einmal** gebündelt nachfragen.
 4. **Bauen:** `build_assembly(project)` (CLI: `uv run slicetheprompt baugruppe <projekt>`), dann
    `out/render.png` ansehen. Liegt ein Teil sichtbar falsch, Platzierung korrigieren (höchstens 5 Runden).

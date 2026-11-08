@@ -60,6 +60,17 @@
           </span>
         </div>
         <div id="assembly-legend" class="asm-legend"></div>
+        <div id="kin-panel" class="hidden">
+          <div class="section-header asm-sub"><span>Bewegen (Gelenke)</span></div>
+          <div id="kin-info" class="kin-info"></div>
+          <div id="kin-joints" class="kin-joints"></div>
+          <div id="kin-status" class="kin-status"></div>
+          <div class="kin-actions">
+            <button id="btn-kin-check" class="btn-xs" disabled title="Bewegte Stellung exakt (CAD) auf Überschneidungen prüfen">Exakt prüfen</button>
+            <button id="btn-kin-reset" class="btn-xs" disabled title="Alle Teile zurück in die gewählte Pose">Zurück zur Pose</button>
+          </div>
+          <div id="kin-live" class="asm-checks"></div>
+        </div>
         <div class="section-header asm-sub"><span>Kollisionsprüfung dieser Pose</span></div>
         <div id="assembly-checks" class="asm-checks"></div>
       </div>
@@ -95,6 +106,9 @@
           </button>
           <button class="tool-btn" data-tool="measure" title="2-Punkt-Abstand &amp; ΔX/ΔY/ΔZ messen [Taste 5]">
             <span class="tool-key">5</span> 📏 Messen
+          </button>
+          <button class="tool-btn hidden" data-tool="bewegen" id="tool-bewegen" title="Teile entlang ihrer Gelenke bewegen – nicht gewählte bleiben fest, Kontakt stoppt [Taste 6]">
+            <span class="tool-key">6</span> ✥ Bewegen
           </button>
         </div>
 

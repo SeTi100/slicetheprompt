@@ -110,8 +110,17 @@ Der Nutzer ist kein CAD-Profi: erkläre Masse und Annahmen in Alltagssprache.
 - `build_assembly(project)` nach jedem Umbau eines Teils (erst das Teil mit `build_and_check`). Danach
   `out/render.png` ansehen und je Pose melden: frei / Klemmkontakt (Tiefe) / Kollision (Paar, mm³).
   Bei Kollision Teile nicht stillschweigend ändern, sondern Ursache und Vorschlag nennen.
-- Studio zeigt Baugruppen mit Posen-Auswahl, Explosion, Ein/Aus je Teil; `get_ui_feedback` enthält
-  die Pose (`pose`), Koordinaten sind Baugruppen-Koordinaten.
+- **Gelenke** (`GELENKE = [...]`) statt fester Stellungen, wenn sich etwas bewegt: `Fest(a)` (Boden),
+  `Fest(a, b)`, `Drehung`, `Schiebung`, `Zylinder`, `Kugel`, `Ebene`, `Schraube(…, steigung=0.7)`,
+  `Getriebe(gelenk_a, gelenk_b, verhaeltnis)`, je mit `grenzen=(min, max)`. Achsen und Punkte in
+  Baugruppen-Koordinaten der Grundstellung (= erste Pose). Keine Formeln für Mechanismen schreiben –
+  der Löser ergibt Kurbeltrieb, Viergelenk usw. selbst. Posen dürfen Gelenkwerte sein:
+  `{"gelenke": {"Kurbel": 90}}`. Hinweis „Pose … verletzt Gelenk …“ heisst: platzierung() und
+  GELENKE passen nicht zusammen → Achse/Punkt prüfen.
+- Studio zeigt Baugruppen mit Posen-Auswahl, Explosion, Ein/Aus je Teil; mit Gelenken zusätzlich
+  **✥ Bewegen** (Auswahl folgt ihren Gelenken, Rest fest, Anschlag bei Kontakt, „Exakt prüfen“).
+  `get_ui_feedback` enthält die Pose (`pose`) und bei bewegten Teilen `gelenkwerte`; Koordinaten sind
+  Baugruppen-Koordinaten.
 
 ## Mehrfarbig
 - model.py definiert `bodies = {"name": Körper, …}` statt `part`. Körper dürfen sich **nicht
@@ -167,6 +176,7 @@ Zuerst `doctor` aufrufen: prüft Drucker, CFS, Slicer und CAD und richtet den Sl
 frischen `git clone` selbst ein (Creality Print suchen, Hi-Profile auflösen).
 Du darfst `slicetheprompt/` reparieren (z. B. Slicer-Aufruf, Profilauswahl in `config/slicer.yaml`).
 Danach `uv run python tests/test_meshcheck.py`, `uv run python tests/test_cfs_3mf.py` und (bei Änderungen
-an `lib/`) `uv run python tests/test_lib.py` ausführen
+an `lib/`) `uv run python tests/test_lib.py`, bei Baugruppen/Gelenken `tests/test_assembly.py` und
+`tests/test_kinematics.py` ausführen
 und den Nutzer informieren, dass der MCP-Server neu verbunden werden muss: Claude Code `/mcp` →
 slicetheprompt → reconnect, Codex neu starten, Antigravity **Customizations → MCP Servers → Refresh**.

@@ -15,6 +15,8 @@ weil Platzierungen meist von Parametern der Teile abhängen. Vertrag:
     def geister(p):                # optional: Bezugskörper (Handy, Okular …), nur Ansicht + Prüfung
         return {"Handy": Pos(0, 0, 10) * Box(160, 75, 8)}
 
+    GELENKE = [Fest("Basis"), Schraube("Knopf 1", "Basis", achse=(1, 0, 0), punkt=(32, 0, 0), steigung=0.7)]
+                                          # optional: Mechanismus (siehe kinematics.py)
     KONTAKT = {("Basis", "Handy"): 0.3}   # erlaubte Eindringtiefe (mm) je Paar, Muster mit * erlaubt
     IGNORIEREN = [("Handy", "Okular")]    # Paare ohne Prüfung
     GRENZE_MM3 = 0.5                      # Überschneidung bis hierher gilt als Rundungsrest
@@ -52,7 +54,10 @@ PALETTE = ["#4E79A7", "#F28E2B", "#59A14F", "#B07AA1", "#EDC948", "#76B7B2", "#F
            "#E15759", "#BAB0AC"]
 GHOST_COLOR = "#9AA5B1"
 
-__all__ = ["Teil", "Geist", "Tf", "pos", "rot", "spiegel", "parameter", "is_assembly", "load_assembly",
+from .kinematics import Drehung, Ebene, Fest, Getriebe, Kugel, Schiebung, Schraube, Zylinder  # noqa: E402,F401
+
+__all__ = ["Fest", "Drehung", "Schiebung", "Zylinder", "Kugel", "Ebene", "Schraube", "Getriebe",
+           "Teil", "Geist", "Tf", "pos", "rot", "spiegel", "parameter", "is_assembly", "load_assembly",
            "build_assembly", "new_assembly"]
 
 
@@ -263,7 +268,21 @@ def load_assembly(d: Path) -> dict:
         "KONTAKT": dict(ns.get("KONTAKT") or {}),
         "IGNORIEREN": list(ns.get("IGNORIEREN") or []),
         "GRENZE_MM3": float(ns.get("GRENZE_MM3", 0.5)),
+        "GELENKE": _gelenke(ns.get("GELENKE")),
     }
+
+
+def _gelenke(g) -> list:
+    from . import kinematics as K
+    if not g:
+        return []
+    if not isinstance(g, (list, tuple)):
+        raise ValueError("assembly.py: GELENKE muss eine Liste sein, z. B. [Fest('Rahmen'), Drehung(...)]")
+    for x in g:
+        if not isinstance(x, K.GELENK_TYPEN):
+            raise ValueError(f"assembly.py: {x!r} ist kein Gelenk (Fest, Drehung, Schiebung, Zylinder, Kugel, "
+                             "Ebene, Schraube, Getriebe)")
+    return list(g)
 
 
 def instances_for_pose(asm: dict, pose: dict) -> list[dict]:
@@ -528,124 +547,37 @@ def build_assembly(project: str) -> dict:
     hinweise: list[str] = []
 
     # 1. Teile: STEP einmal laden, STL in Drucklage schreiben
-    teile_json, shapes = [], {}
-    for i, (name, teil) in enumerate(asm["TEILE"].items()):
-        pd = project_dir(teil.projekt)
-        step = pd / "out" / "model.step"
-        if not step.exists():
-            raise FileNotFoundError(f"Teil '{name}': {pd.name}/out/model.step fehlt – erst build_and_check "
-                                    f"für {pd.name}")
-        shp = import_step(str(step))
-        shapes[name] = shp
-        stl = sub / f"teil_{_slug(name)}.stl"
-        tris = tessellate(shp)
-        write_stl(stl, tris, header=f"slicetheprompt {d.name} {name}")
-        st = _part_status(pd)
-        if st["veraltet"]:
-            hinweise.append(f"{name}: model.py ist neuer als out/model.step – Teil neu bauen")
-        if st["passed"] is False:
-            hinweise.append(f"{name}: Teilprüfung hat {st['errors']} Fehler")
-        teile_json.append({
-            "name": name, "projekt": pd.name, "anzahl": teil.anzahl,
-            "farbe": teil.farbe or PALETTE[i % len(PALETTE)],
-            "stl": f"{OUT_SUB}/{stl.name}", "dreiecke": int(len(tris)),
-            "volumen_mm3": round(float(shp.volume), 2), "bbox_druck": _bbox(shp).round(3).tolist(),
-            "explosion": list(teil.explosion) if teil.explosion else None,
-            "beschreibung": teil.beschreibung, "status": st,
-        })
+    teile_json, shapes, h = _load_parts(asm, d, sub)
+    hinweise += h
 
-    # 2. Posen
+    # 2. Gelenke (optional) – Grundstellung = erste Pose
     ghost_files: dict[str, dict] = {}       # Hash -> {id, stl}
     tf_cache: dict[tuple, object] = {}       # (quelle, matrix) -> transformierter Körper
     pair_cache: dict[tuple, dict] = {}       # (key a, key b) -> Ergebnis
-    posen_json, alle_checks = [], []
-    for pi, (pname, pvals) in enumerate(asm["POSEN"].items()):
+    posen = list(asm["POSEN"].items())
+    kin = None
+    if asm["GELENKE"]:
+        ref_insts, _ = _pose_bodies(asm, dict(posen[0][1] or {}), shapes, sub, ghost_files, tf_cache)
+        kin = _kin_setup(asm, ref_insts)
+        hinweise += kin.pop("_hinweise")
+
+    # 3. Posen
+    posen_json = []
+    for pi, (pname, pvals) in enumerate(posen):
         tp = time.time()
         pvals = dict(pvals or {})
-        insts = instances_for_pose(asm, pvals)
-        for it in insts:
-            k = (it["teil"], it["tf"].key())
-            if k not in tf_cache:
-                tf_cache[k] = transform_shape(shapes[it["teil"]], it["tf"])
-            it["shape"], it["key"], it["geist"] = tf_cache[k], k, False
-        geister = asm["geister"](pvals) if asm["geister"] else {}
-        g_json = []
-        for gname, g in (geister or {}).items():
-            if isinstance(g, (tuple, list)):
-                g = Geist(*g)
-            elif not isinstance(g, Geist):
-                g = Geist(g)
-            farbe = g.farbe or GHOST_COLOR
-            local = tessellate(g.form, 0.02, 0.2)
-            if g.lage is not None:                 # Form in eigenen Koordinaten, Lage als Matrix
-                lage = g.lage if isinstance(g.lage, Tf) else Tf(g.lage)
-                gshape = lage * g.form
-            else:                                  # Form schon in Baugruppen-Koordinaten
-                corner = local.reshape(-1, 3).min(axis=0) if len(local) else np.zeros(3)
-                lage, local, gshape = pos(*corner), local - corner, g.form
-            h = hashlib.sha1(np.round(local, 3).tobytes()).hexdigest()[:10]
-            if h not in ghost_files:
-                gid = f"{_slug(gname)}_{h}"
-                write_stl(sub / f"geist_{gid}.stl", local, header=f"slicetheprompt geist {gname}")
-                ghost_files[h] = {"id": gid, "stl": f"{OUT_SUB}/geist_{gid}.stl"}
-            g_json.append({"name": gname, "id": ghost_files[h]["id"], "stl": ghost_files[h]["stl"],
-                           "farbe": farbe, "matrix": lage.as_list(), "gespiegelt": lage.det < 0,
-                           "folgt": g.folgt})
-            insts.append({"name": gname, "teil": gname, "tf": lage, "shape": gshape,
-                          "key": ("geist", h, lage.key()), "geist": True})
+        insts, g_json = _pose_bodies(asm, pvals, shapes, sub, ghost_files, tf_cache)
+        werte = None
+        if kin:
+            werte, h = _kin_pose(kin, insts, g_json, pvals, pname, shapes, tf_cache)
+            hinweise += h
         for it in insts:
             it["bbox"] = _bbox(it["shape"])
-
-        ueber, abst, checks = [], [], []
         pslug = f"p{pi + 1:02d}_{_slug(pname)}"
-        for a, b in itertools.combinations(insts, 2):
-            if ignored(asm, a, b):
-                continue
-            ck = tuple(sorted((a["key"], b["key"])))
-            res = pair_cache.get(ck)
-            if res is None:
-                res = {"volumen": 0.0, "tiefe": None, "abstand": None, "genau": True, "inter": None}
-                gap = bbox_gap(a["bbox"], b["bbox"])
-                if bbox_overlap(a["bbox"], b["bbox"]):
-                    inter = intersection(a["shape"], b["shape"])
-                    if inter is not None:
-                        res["volumen"] = float(inter.volume)
-                        res["inter"] = inter
-                        res["abstand"] = 0.0
-                if res["abstand"] is None:
-                    if gap < NAH_MM:
-                        res["abstand"] = min_distance(a["shape"], b["shape"])
-                    else:
-                        res["abstand"], res["genau"] = gap, False
-                pair_cache[ck] = res
-            paar = f"{a['name']} + {b['name']}"
-            abst.append({"a": a["name"], "b": b["name"], "mm": round(res["abstand"], 3), "genau": res["genau"]})
-            if res["inter"] is None:
-                continue
-            limit = contact_limit(asm, a, b)
-            if limit is not None and res["tiefe"] is None:
-                res["tiefe"] = penetration_depth(res["inter"], a["shape"], b["shape"])
-            stl = sub / f"{pslug}__{_slug(a['name'])}__{_slug(b['name'])}.stl"
-            write_stl(stl, tessellate(res["inter"], 0.005, 0.1), header=f"ueberschneidung {paar}")
-            if limit is not None:
-                ok = res["tiefe"] <= limit + 1e-6
-                art, text = "klemmkontakt", (f"{paar}: {res['volumen']:.2f} mm³, Tiefe {res['tiefe']:.2f} mm "
-                                             f"({'≤' if ok else '>'} erlaubt {limit:g} mm)")
-            else:
-                ok = res["volumen"] <= asm["GRENZE_MM3"]
-                art, text = "ueberschneidung", (f"{paar}: {res['volumen']:.2f} mm³ "
-                                                f"({'≤' if ok else '>'} {asm['GRENZE_MM3']:g} mm³)")
-            ueber.append({"a": a["name"], "b": b["name"], "volumen_mm3": round(res["volumen"], 3),
-                          "tiefe_mm": None if res["tiefe"] is None else round(res["tiefe"], 3),
-                          "erlaubt_tiefe_mm": limit, "art": art, "ok": ok, "stl": f"{OUT_SUB}/{stl.name}",
-                          "bbox": _bbox(res["inter"]).round(3).tolist()})
-            checks.append({"pose": pname, "paar": paar, "art": art, "ok": ok, "text": text,
-                           "volumen_mm3": round(res["volumen"], 3),
-                           "tiefe_mm": None if res["tiefe"] is None else round(res["tiefe"], 3)})
-        pose_ok = all(c["ok"] for c in checks)
-        alle_checks += checks
+        ueber, abst, checks = check_pairs(asm, insts, sub, pslug, pname, pair_cache)
         posen_json.append({
-            "name": pname, "werte": pvals, "ok": pose_ok,
+            "name": pname, "werte": pvals, "ok": all(c["ok"] for c in checks),
+            "gelenkwerte": werte,
             "instanzen": [{"name": it["name"], "teil": it["teil"], "matrix": it["tf"].as_list(),
                            "gespiegelt": it["tf"].det < 0, "bbox": it["bbox"].round(3).tolist()}
                           for it in insts if not it["geist"]],
@@ -665,8 +597,10 @@ def build_assembly(project: str) -> dict:
         "beschreibung": asm["doc"].splitlines()[0] if asm["doc"] else "",
         "teile": teile_json,
         "posen": posen_json,
+        "kinematik": kin,
         "grenze_mm3": asm["GRENZE_MM3"],
         "kontakt": [{"paar": list(k), "tiefe_mm": v} for k, v in asm["KONTAKT"].items()],
+        "ignorieren": [list(p) for p in asm["IGNORIEREN"]],
         "bbox": bb_all.round(3).tolist(),
         "hinweise": hinweise,
         "zeit_s": round(time.time() - t0, 1),
@@ -678,6 +612,281 @@ def build_assembly(project: str) -> dict:
     except Exception as exc:  # noqa: BLE001 – Bild ist Beigabe, Prüfung bleibt gültig
         png, res["hinweise"] = None, hinweise + [f"render.png fehlgeschlagen: {exc}"]
     return summary(res, png)
+
+
+def _load_parts(asm: dict, d: Path, sub: Path | None) -> tuple[list, dict, list]:
+    """STEP je Teil einmal laden; mit `sub` auch STL schreiben. -> (teile_json, shapes, hinweise)"""
+    from build123d import import_step
+
+    from .stlio import write_stl
+
+    teile_json, shapes, hinweise = [], {}, []
+    for i, (name, teil) in enumerate(asm["TEILE"].items()):
+        pd = project_dir(teil.projekt)
+        step = pd / "out" / "model.step"
+        if not step.exists():
+            raise FileNotFoundError(f"Teil '{name}': {pd.name}/out/model.step fehlt – erst build_and_check "
+                                    f"für {pd.name}")
+        shp = import_step(str(step))
+        shapes[name] = shp
+        if sub is None:
+            continue
+        stl = sub / f"teil_{_slug(name)}.stl"
+        tris = tessellate(shp)
+        write_stl(stl, tris, header=f"slicetheprompt {d.name} {name}")
+        st = _part_status(pd)
+        if st["veraltet"]:
+            hinweise.append(f"{name}: model.py ist neuer als out/model.step – Teil neu bauen")
+        if st["passed"] is False:
+            hinweise.append(f"{name}: Teilprüfung hat {st['errors']} Fehler")
+        teile_json.append({
+            "name": name, "projekt": pd.name, "anzahl": teil.anzahl,
+            "farbe": teil.farbe or PALETTE[i % len(PALETTE)],
+            "stl": f"{OUT_SUB}/{stl.name}", "dreiecke": int(len(tris)),
+            "volumen_mm3": round(float(shp.volume), 2), "bbox_druck": _bbox(shp).round(3).tolist(),
+            "explosion": list(teil.explosion) if teil.explosion else None,
+            "beschreibung": teil.beschreibung, "status": st,
+        })
+    return teile_json, shapes, hinweise
+
+
+def _pose_bodies(asm, pvals, shapes, sub, ghost_files, tf_cache):
+    """Körper einer Pose: Teile (aus platzierung) und Geister. -> (insts, geister_json)"""
+    from .stlio import write_stl
+
+    insts = instances_for_pose(asm, pvals)
+    for it in insts:
+        k = (it["teil"], it["tf"].key())
+        if k not in tf_cache:
+            tf_cache[k] = transform_shape(shapes[it["teil"]], it["tf"])
+        it["shape"], it["key"], it["geist"] = tf_cache[k], k, False
+    geister = asm["geister"](pvals) if asm["geister"] else {}
+    g_json = []
+    for gname, g in (geister or {}).items():
+        if isinstance(g, (tuple, list)):
+            g = Geist(*g)
+        elif not isinstance(g, Geist):
+            g = Geist(g)
+        farbe = g.farbe or GHOST_COLOR
+        local = tessellate(g.form, 0.02, 0.2)
+        if g.lage is not None:                 # Form in eigenen Koordinaten, Lage als Matrix
+            lage = g.lage if isinstance(g.lage, Tf) else Tf(g.lage)
+            gshape, base = lage * g.form, g.form
+        else:                                  # Form schon in Baugruppen-Koordinaten
+            corner = local.reshape(-1, 3).min(axis=0) if len(local) else np.zeros(3)
+            lage, local, gshape = pos(*corner), local - corner, g.form
+            base = pos(*(-corner)) * g.form
+        h = hashlib.sha1(np.round(local, 3).tobytes()).hexdigest()[:10]
+        if h not in ghost_files and sub is not None:
+            gid = f"{_slug(gname)}_{h}"
+            write_stl(sub / f"geist_{gid}.stl", local, header=f"slicetheprompt geist {gname}")
+            ghost_files[h] = {"id": gid, "stl": f"{OUT_SUB}/geist_{gid}.stl"}
+        gf = ghost_files.get(h, {"id": h, "stl": None})
+        g_json.append({"name": gname, "id": gf["id"], "stl": gf["stl"],
+                       "farbe": farbe, "matrix": lage.as_list(), "gespiegelt": lage.det < 0,
+                       "folgt": g.folgt})
+        insts.append({"name": gname, "teil": gname, "tf": lage, "shape": gshape, "base": base,
+                      "key": ("geist", h, lage.key()), "geist": True})
+    return insts, g_json
+
+
+def _move(it: dict, D: np.ndarray, shapes: dict, tf_cache: dict) -> None:
+    """Körper um D (4×4, Welt) bewegen."""
+    tf = Tf(D) * it["tf"]
+    it["tf"] = tf
+    if it["geist"]:
+        it["shape"] = tf * it["base"]
+        it["key"] = ("geist", it["key"][1], tf.key())
+    else:
+        k = (it["teil"], tf.key())
+        if k not in tf_cache:
+            tf_cache[k] = transform_shape(shapes[it["teil"]], tf)
+        it["shape"], it["key"] = tf_cache[k], k
+
+
+def _kin_setup(asm: dict, ref_insts: list[dict]) -> dict:
+    """Gelenke prüfen und für Studio/JSON aufbereiten (Bezug: Grundstellung = erste Pose)."""
+    from . import kinematics as K
+
+    names = [it["name"] for it in ref_insts]
+    joints = K.prepare([g.to_json() for g in asm["GELENKE"]], names)
+    for it in ref_insts:
+        it["bbox"] = _bbox(it["shape"])
+    zentren = {it["name"]: ((it["bbox"][0] + it["bbox"][1]) / 2).round(4).tolist() for it in ref_insts}
+    mech = K.Mechanismus(names, joints)
+    mech.set_centers(zentren)
+    hinweise = []
+    for jn, e in joint_errors(mech).items():
+        if e > 0.01:
+            hinweise.append(f"Gelenk {jn}: passt in der Grundstellung nicht (Rest {e:.3f}) – Achse/Punkt prüfen")
+    frei = [it["name"] for it in ref_insts if it["name"] not in mech.fixed and not _connected(it["name"], joints)]
+    if frei:
+        hinweise.append(f"Ohne Gelenk (bewegen sich frei): {', '.join(frei)}")
+    return {
+        "gelenke": joints,
+        "koerper": names,
+        "grundstellung": {it["name"]: it["tf"].as_list() for it in ref_insts},
+        "zentren": zentren,
+        "boden": sorted(mech.fixed),
+        "freiheitsgrade": mech.dof(),
+        "_hinweise": hinweise,
+    }
+
+
+def _connected(name: str, joints: list[dict]) -> bool:
+    return any(j.get("a") == name or j.get("b") == name for j in joints)
+
+
+def joint_errors(mech) -> dict:
+    """Grösster Restfehler je Gelenk in der aktuellen Lage."""
+    out = {}
+    st = (mech.R, mech.c)
+    saved = mech.joints
+    try:
+        for j in saved:
+            if j["typ"] in ("boden", "getriebe"):
+                continue
+            mech.joints = [j]
+            r = mech.residuals(st, extra=False)
+            out[j["name"]] = float(np.max(np.abs(r))) if len(r) else 0.0
+    finally:
+        mech.joints = saved
+    return out
+
+
+def _kin_pose(kin, insts, g_json, pvals, pname, shapes, tf_cache):
+    """Gelenkwerte einer Pose messen; mit pvals['gelenke'] die Teile per Löser dorthin bewegen."""
+    from . import kinematics as K
+
+    ref = {n: np.array(m, float).reshape(4, 4) for n, m in kin["grundstellung"].items()}
+    by = {it["name"]: it for it in insts}
+    hinweise = []
+
+    def mech_now():
+        for it in insts:
+            it["bbox"] = _bbox(it["shape"])
+        disp = {n: by[n]["tf"].m @ np.linalg.inv(ref[n]) for n in by if n in ref}
+        m = K.Mechanismus(list(by), K.move_joints(kin["gelenke"], disp))
+        m.set_centers({n: (by[n]["bbox"][0] + by[n]["bbox"][1]) / 2 for n in by})
+        return m
+
+    drives = pvals.get("gelenke") or {}
+    if drives:
+        m = mech_now()
+        res = m.solve(drives)
+        if not res["ok"]:
+            hinweise.append(f"Pose {pname}: Gelenkwerte {drives} nicht erreichbar (Rest {res['rest']:.3g})")
+        for n in m.movable:
+            D = m.displacement(n)
+            if np.abs(D - np.eye(4)).max() > 1e-9:
+                _move(by[n], D, shapes, tf_cache)
+        for g in g_json:
+            g["matrix"] = by[g["name"]]["tf"].as_list()
+    m = mech_now()
+    fehler = {k: v for k, v in joint_errors(m).items() if v > 0.01}
+    if fehler:
+        worst = max(fehler, key=fehler.get)
+        hinweise.append(f"Pose {pname}: verletzt Gelenk {worst} um {fehler[worst]:.3f} "
+                        f"(platzierung und GELENKE passen nicht zusammen)")
+    return {k: round(v, 4) for k, v in m.coords().items()}, hinweise
+
+
+def check_pairs(asm, insts, sub, pslug, pname, pair_cache=None):
+    """Alle Paare prüfen: Überschneidung (exakt), Eindringtiefe bei Klemmkontakt, kleinster Abstand."""
+    from .stlio import write_stl
+
+    pair_cache = {} if pair_cache is None else pair_cache
+    ueber, abst, checks = [], [], []
+    for it in insts:
+        if "bbox" not in it:
+            it["bbox"] = _bbox(it["shape"])
+    for a, b in itertools.combinations(insts, 2):
+        if ignored(asm, a, b):
+            continue
+        ck = tuple(sorted((a["key"], b["key"])))
+        res = pair_cache.get(ck)
+        if res is None:
+            res = {"volumen": 0.0, "tiefe": None, "abstand": None, "genau": True, "inter": None}
+            gap = bbox_gap(a["bbox"], b["bbox"])
+            if bbox_overlap(a["bbox"], b["bbox"]):
+                inter = intersection(a["shape"], b["shape"])
+                if inter is not None:
+                    res["volumen"] = float(inter.volume)
+                    res["inter"] = inter
+                    res["abstand"] = 0.0
+            if res["abstand"] is None:
+                if gap < NAH_MM:
+                    res["abstand"] = min_distance(a["shape"], b["shape"])
+                else:
+                    res["abstand"], res["genau"] = gap, False
+            pair_cache[ck] = res
+        paar = f"{a['name']} + {b['name']}"
+        abst.append({"a": a["name"], "b": b["name"], "mm": round(res["abstand"], 3), "genau": res["genau"]})
+        if res["inter"] is None:
+            continue
+        limit = contact_limit(asm, a, b)
+        if limit is not None and res["tiefe"] is None:
+            res["tiefe"] = penetration_depth(res["inter"], a["shape"], b["shape"])
+        stl = sub / f"{pslug}__{_slug(a['name'])}__{_slug(b['name'])}.stl"
+        write_stl(stl, tessellate(res["inter"], 0.005, 0.1), header=f"ueberschneidung {paar}")
+        if limit is not None:
+            ok = res["tiefe"] <= limit + 1e-6
+            art, text = "klemmkontakt", (f"{paar}: {res['volumen']:.2f} mm³, Tiefe {res['tiefe']:.2f} mm "
+                                         f"({'≤' if ok else '>'} erlaubt {limit:g} mm)")
+        else:
+            ok = res["volumen"] <= asm["GRENZE_MM3"]
+            art, text = "ueberschneidung", (f"{paar}: {res['volumen']:.2f} mm³ "
+                                            f"({'≤' if ok else '>'} {asm['GRENZE_MM3']:g} mm³)")
+        ueber.append({"a": a["name"], "b": b["name"], "volumen_mm3": round(res["volumen"], 3),
+                      "tiefe_mm": None if res["tiefe"] is None else round(res["tiefe"], 3),
+                      "erlaubt_tiefe_mm": limit, "art": art, "ok": ok, "stl": f"{OUT_SUB}/{stl.name}",
+                      "bbox": _bbox(res["inter"]).round(3).tolist()})
+        checks.append({"pose": pname, "paar": paar, "art": art, "ok": ok, "text": text,
+                       "volumen_mm3": round(res["volumen"], 3),
+                       "tiefe_mm": None if res["tiefe"] is None else round(res["tiefe"], 3)})
+    return ueber, abst, checks
+
+
+def check_state(project: str, pose_index: int, verschiebung: dict) -> dict:
+    """Exakte Prüfung einer im Studio bewegten Stellung.
+
+    verschiebung = {Körper: 16 Werte (4×4 zeilenweise, Welt): Lage in der Pose -> neue Lage}.
+    Schreibt die Überschneidungen nach out/assembly/live__*.stl und gibt sie wie eine Pose zurück."""
+    d = project_dir(project)
+    asm = load_assembly(d)
+    sub = d / "out" / OUT_SUB
+    sub.mkdir(parents=True, exist_ok=True)
+    for f in sub.glob("live__*.stl"):
+        try:
+            f.unlink()
+        except OSError:
+            pass
+    _, shapes, _ = _load_parts(asm, d, None)
+    posen = list(asm["POSEN"].items())
+    pname, pvals = posen[int(pose_index)]
+    tf_cache: dict = {}
+    insts, _ = _pose_bodies(asm, dict(pvals or {}), shapes, None, {}, tf_cache)
+    # Lage wie in assembly.json (Posen mit Gelenkwerten sind dort schon gelöst)
+    aj = json.loads((d / "out" / "assembly.json").read_text(encoding="utf-8"))
+    pj = aj["posen"][int(pose_index)]
+    mats = {i["name"]: i["matrix"] for i in pj["instanzen"]}
+    mats.update({g["name"]: g["matrix"] for g in pj["geister"]})
+    for it in insts:
+        D = None
+        if it["name"] in mats:
+            D = np.array(mats[it["name"]], float).reshape(4, 4) @ np.linalg.inv(it["tf"].m)
+        v = verschiebung.get(it["name"])
+        if v is not None:
+            V = np.array(v, float).reshape(4, 4)
+            D = V if D is None else V @ D
+        if D is not None and np.abs(D - np.eye(4)).max() > 1e-9:
+            _move(it, D, shapes, tf_cache)
+        it.pop("bbox", None)
+    t0 = time.time()
+    ueber, abst, checks = check_pairs(asm, insts, sub, "live", f"{pname} (bewegt)")
+    return {"ok": all(c["ok"] for c in checks), "pose": pname, "ueberschneidungen": ueber,
+            "abstaende": sorted(abst, key=lambda x: x["mm"])[:12], "checks": checks,
+            "zeit_s": round(time.time() - t0, 1)}
 
 
 def summary(res: dict, png=None) -> dict:
@@ -760,6 +969,10 @@ def geister(p):
     """Bezugskörper, die nicht gedruckt werden (z. B. Handy, Rohr), als build123d-Körper."""
     return {{}}
 
+
+# Gelenke (optional): was sich wie bewegen darf – Achsen/Punkte in der Grundstellung (erste Pose)
+# GELENKE = [Fest("Teil A"), Drehung("Teil B", "Teil A", achse=(0, 0, 1), punkt=(0, 0, 0), grenzen=(-90, 90))]
+GELENKE = []
 
 KONTAKT = {{}}        # {{("Teil A", "Geist"): 0.3}} erlaubte Eindringtiefe in mm (Klemmkontakt)
 IGNORIEREN = []      # [("Teil A", "Teil B")] Paare ohne Prüfung

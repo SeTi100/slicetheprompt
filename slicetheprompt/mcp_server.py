@@ -145,7 +145,8 @@ def build_assembly(project: str) -> dict:
     """Baugruppe bauen und prüfen (Projekt mit assembly.py statt model.py): lädt je Teil out/model.step,
     setzt die Teile in jeder Pose (POSEN) zusammen, misst Überschneidungen exakt (rote STLs) und den
     kleinsten Abstand je Paar, prüft erlaubte Klemmkontakte (KONTAKT) und schreibt out/assembly.json
-    sowie out/render.png (erste Pose). Teile vorher einzeln mit build_and_check bauen.
+    sowie out/render.png (erste Pose). Mit GELENKE in assembly.py werden Posen mit Gelenkwerten gelöst
+    und Platzierungen gegen die Gelenke geprüft (Hinweise). Teile vorher einzeln mit build_and_check bauen.
     Danach das PNG ansehen; im Studio lassen sich alle Posen ohne Neubau umschalten."""
     return _worker("build_assembly", project)
 

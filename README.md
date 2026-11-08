@@ -132,6 +132,40 @@ def geister(p):
 `out/assembly.json` enthält je Pose nur Matrizen, Farben und Prüfergebnisse; die Teile liegen je einmal
 als STL in `out/assembly/`. Für Agenten gibt es zusätzlich `out/render.png` der ersten Pose.
 
+#### Bewegen mit Gelenken
+
+Mit `GELENKE` wird aus der Baugruppe ein Mechanismus. Jedes Gelenk nimmt Freiheitsgrade weg – die
+möglichen Bewegungen ergeben sich daraus, ohne eigene Formel je Mechanismus. Ein Löser (gedämpfte
+kleinste Quadrate über alle Teile) hält die Gelenke ein, auch in geschlossenen Ketten wie Kurbeltrieb
+oder Viergelenk.
+
+| Gelenk | bleibt frei |
+| --- | --- |
+| `Fest(a)` / `Fest(a, b)` | nichts (a ist Boden bzw. starr an b) |
+| `Drehung(a, b, achse, punkt)` | 1 Drehung |
+| `Schiebung(a, b, achse)` | 1 Verschiebung |
+| `Zylinder(a, b, achse, punkt)` | Drehung + Verschiebung |
+| `Kugel(a, b, punkt)` | 3 Drehungen |
+| `Ebene(a, b, normale, punkt)` | 2 Verschiebungen + Drehung |
+| `Schraube(a, b, achse, punkt, steigung)` | Drehung, Vorschub = Steigung je Umdrehung |
+| `Getriebe(gelenk_a, gelenk_b, verhaeltnis)` | koppelt zwei Gelenke (Zahnrad, Zahnstange, Riemen) |
+
+`grenzen=(min, max)` setzt Anschläge (mm bzw. Grad, 0 = Grundstellung = erste Pose). Posen können
+auch Gelenkwerte sein: `POSEN = {"90°": {"gelenke": {"Kurbel": 90}}}` – `build_assembly` löst sie und
+prüft sie exakt. Passt eine Pose aus `platzierung()` nicht zu den Gelenken, steht das in den Hinweisen.
+
+| | |
+| --- | --- |
+| <img src="docs/images/12-bewegen.webp" alt="Kurbeltrieb im Studio, Kurbel auf 125° gedreht"> | **✥ Bewegen (Taste 6).** Teile anklicken (Umschalt = mehrere) und ziehen oder am Regler drehen: Alles Nicht-Gewählte bleibt fest, die Auswahl folgt nur ihren Gelenken, die Anzeige nennt die verbleibenden Freiheitsgrade. Stösst ein bewegtes Teil an, bleibt es am Kontakt stehen („Anschlag: Knopf 1 ↔ Okularklemme“); aufliegende Flächen dürfen gleiten. „Exakt prüfen“ rechnet die bewegte Stellung mit dem CAD-Kern nach. Hier das Beispiel `beispiel-kurbeltrieb`: Kurbel auf 125°, Kolbenweg −33,75 mm – genau der Wert aus der Kurbeltrieb-Formel, ohne dass sie irgendwo steht. |
+
+```powershell
+uv run slicetheprompt run beispiel-kurbeltrieb-rahmen     # … -kurbel, -pleuel, -kolben ebenso
+uv run slicetheprompt baugruppe beispiel-kurbeltrieb
+```
+
+Grenzen: Es wird geometrisch bewegt, nicht mit Kräften gerechnet (keine Reibung, keine Klemmkraft);
+Gewinde wirken nur als Kopplung Drehung ↔ Vorschub.
+
 ### Der Kreislauf
 
 ```

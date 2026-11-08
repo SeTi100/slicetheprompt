@@ -207,12 +207,12 @@ def build_assembly_state(d: Path) -> dict[str, Any]:
     }
 
 
-def _run_assembly_worker(d: Path) -> dict[str, Any]:
-    """build_assembly im eigenen Prozess (OCC-Last nicht im UI-Server)."""
+def _run_assembly_worker(d: Path, func: str = "build_assembly", *extra: Any) -> dict[str, Any]:
+    """build_assembly / check_state im eigenen Prozess (OCC-Last nicht im UI-Server)."""
     import os
     import subprocess
     import sys
-    proc = subprocess.run([sys.executable, "-m", "slicetheprompt._worker", "build_assembly", json.dumps([str(d)])],
+    proc = subprocess.run([sys.executable, "-m", "slicetheprompt._worker", func, json.dumps([str(d), *extra])],
                           cwd=str(Path(__file__).resolve().parents[1]), capture_output=True, text=True,
                           encoding="utf-8", errors="replace", timeout=900,
                           env={**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"})
@@ -221,6 +221,8 @@ def _run_assembly_worker(d: Path) -> dict[str, Any]:
     except json.JSONDecodeError:
         return {"ok": False, "error": f"build_assembly: keine gültige Antwort (Exit {proc.returncode})",
                 "stderr": proc.stderr[-2000:]}
+    if func != "build_assembly":
+        return res
     return {"stage": "baugruppe" if res.get("ok") is not None and "error" not in res else "fehler", **res}
 
 
@@ -370,6 +372,7 @@ def save_project_feedback(d: Path, payload: dict[str, Any]) -> dict[str, Any]:
         "created_at": dt.datetime.now().isoformat(timespec="seconds"),
         "view_mode": payload.get("view_mode") or "print",
         "pose": payload.get("pose"),
+        "gelenkwerte": payload.get("gelenkwerte"),
         "general_note": (payload.get("general_note") or "").strip(),
         "screenshot": str(png_path) if png_path.exists() else None,
         "annotations": payload.get("annotations") or [],
@@ -724,6 +727,21 @@ class StudioHandler(BaseHTTPRequestHandler):
                     params_mod.update_params(d / "model.py", clean_updates)
                     run_res = pipeline.run_all(str(d), orient, reason="ui_param_edit")
                 self._send_json({"ok": run_res.get("stage") == "done", "run": run_res, "state": build_project_state(d)})
+                return
+
+            if action == "check_state" and asm_mod.is_assembly(d):
+                pose = int(body.get("pose") or 0)
+                versch = body.get("verschiebung") or {}
+                if not isinstance(versch, dict) or any(
+                        not isinstance(v, list) or len(v) != 16 for v in versch.values()):
+                    self._send_json({"ok": False, "error": "verschiebung: {Körper: 16 Zahlen}"}, status=400)
+                    return
+                res = _run_assembly_worker(d, "check_state", pose, versch)
+                stamp = int(time.time() * 1000)
+                base = f"/api/projects/{urllib.parse.quote(d.name)}/files/out"
+                for u in res.get("ueberschneidungen") or []:
+                    u["url"] = f"{base}/{urllib.parse.quote(u['stl'])}?t={stamp}"
+                self._send_json(res, status=200 if "error" not in res else 500)
                 return
 
             if action == "rebuild" and asm_mod.is_assembly(d) and not (d / "model.py").exists():

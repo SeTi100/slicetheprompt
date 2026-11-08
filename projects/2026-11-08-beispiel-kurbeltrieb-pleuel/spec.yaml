@@ -1,0 +1,22 @@
+# Spezifikation – von Claude aus dem Prompt erstellt, von dir geprüft.
+name: beispiel-kurbeltrieb-pleuel
+beschreibung: "Beispiel Kurbeltrieb: Pleuel L = 60 mit zwei Augen Ø14, Bohrungen fit Ø6"
+material: pla        # pla | petg
+qualitaet: standard         # fein (0.12) | standard (0.20) | grob (0.28)
+menge: 1
+koerper: null               # getrennte Teile in einem Druck (z. B. 3 Testringe); leer = ein zusammenhängender Körper
+wand_soll: null             # vom Nutzer gewünschte Wandstärke unter 1,6 mm (z. B. 1.2) – Warnung richtet sich danach
+# Filament/Spule: leer = passende Spule automatisch (meiste Restmenge).
+#   einfarbig:  filament: T1C        oder  filament: schwarz   oder  filament: "#FF0000"
+#   mehrfarbig: filament: {grundkoerper: weiss, schrift: T1D}   (Schlüssel = Namen in bodies)
+filament: null
+# Soll-Aussenmasse (Bounding Box im Modell-Koordinatensystem) in mm, wird automatisch geprüft
+bbox: [74, 14, 4]
+bbox_tol: 0.05
+# wichtige Masse und woher sie kommen
+masse:
+  - "Augenabstand 60 mm"
+  - "Bohrungen fit(6) auf Zapfen pin_d(6)"
+# Annahmen, die Claude getroffen hat
+annahmen:
+  - "Teil der Beispiel-Baugruppe beispiel-kurbeltrieb (Gelenke, geschlossene Kette)"

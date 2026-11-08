@@ -1,6 +1,8 @@
 import * as THREE from "three";
 import { OrbitControls } from "/vendor/OrbitControls.js";
 import { STLLoader } from "/vendor/STLLoader.js";
+import { Mechanism } from "/kinematics.js";
+import { buildBVH, meshesPenetrate } from "/collide.js";
 
 // ============================================================================
 // Global Studio State
@@ -39,9 +41,25 @@ const S = {
     edgeCache: new Map(),  // url -> EdgesGeometry
     prevViewMode: null,
   },
+  // Bewegen mit Gelenken (nur Baugruppen mit GELENKE)
+  kin: {
+    selected: new Set(),
+    world: {},        // Körper -> aktuelle Welt-Lage (16 Werte zeilenweise)
+    poseWorld: {},    // Lage in der gewählten Pose
+    mech: null,
+    bvh: new Map(),   // Netz-URL -> Hüllquader-Baum
+    info: {},
+    preexisting: new Set(),
+    moved: false,
+    live: null,
+    drag: null,
+    down: null,
+    blocked: null,
+  },
 };
 
 const stlLoader = new STLLoader();
+window.__studio = { S }; // Lesezugriff für Tests/Fehlersuche (Konsole)
 
 // ============================================================================
 // Three.js Scene Setup (Z-Up Engineering Convention)
@@ -846,6 +864,7 @@ function setTool(toolName) {
     box: "⬚ Bereichsbox: 1. Klick = Startpunkt am Bauteil/Bett → 2. Klick = gegenüberliegende Ecke (Höhe Z rechts feinjustierbar).",
     move: "➔ Von→Nach: 1. Klick auf die aktuell falsche Position → 2. Klick auf die gewünschte Zielposition (Fläche oder Bettraster).",
     measure: "📏 Messband: 1. Klick = Startpunkt A → 2. Klick = Endpunkt B (zeigt Distanz & |ΔX|, |ΔY|, |ΔZ| in mm).",
+    bewegen: "✥ Bewegen: Teil anklicken (Umschalt = mehrere) und ziehen – es folgt nur seinen Gelenken, nicht gewählte Teile bleiben fest, Kontakt stoppt.",
   };
   if (hints[toolName]) {
     hintBar.textContent = hints[toolName];
@@ -853,8 +872,23 @@ function setTool(toolName) {
   } else {
     hintBar.classList.add("hidden");
   }
-  canvas.style.cursor = toolName === "orbit" ? "grab" : "crosshair";
+  canvas.style.cursor = toolName === "orbit" ? "grab" : toolName === "bewegen" ? "move" : "crosshair";
+  if (toolName === "bewegen" && kinData()) {
+    if (S.asm.explode) {
+      S.asm.explode = 0;
+      document.getElementById("explode-slider").value = "0";
+      document.getElementById("explode-value").textContent = "0 %";
+      applyExplosion();
+    }
+    kinSession();
+  }
+  if (isAssembly()) kinHighlight();
 }
+
+// Bewegen-Werkzeug: vor OrbitControls (Capture-Phase)
+canvas.addEventListener("pointerdown", (ev) => { kinPointerDown(ev); }, { capture: true });
+canvas.addEventListener("pointermove", (ev) => { if (kinPointerMove(ev)) ev.stopImmediatePropagation(); }, { capture: true });
+canvas.addEventListener("pointerup", (ev) => { kinPointerUp(ev); }, { capture: true });
 
 // Distinguish clean click from orbit drag
 let downXY = null;
@@ -1826,6 +1860,7 @@ async function saveFeedbackForAgent() {
     based_on_version: S.state?.version || S.state?.latest_version || null,
     view_mode: isAssembly() ? "baugruppe" : S.viewMode,
     pose: isAssembly() ? asmPose()?.name || null : undefined,
+    gelenkwerte: isAssembly() && S.kin.moved ? S.kin.lastCoords || null : undefined,
     general_note: generalNote,
     screenshot_data_url: dataUrl,
     annotations: S.annotations,
@@ -2103,6 +2138,7 @@ function bindEvents() {
     else if (ev.key === "3") setTool("box");
     else if (ev.key === "4") setTool("move");
     else if (ev.key === "5") setTool("measure");
+    else if (ev.key === "6" && kinData()) setTool("bewegen");
     else if (ev.key === "Escape") {
       S.pendingPoint = null;
       clearGroup(previewGroup);
@@ -2123,6 +2159,9 @@ function bindEvents() {
   document.getElementById("btn-space-model").addEventListener("click", () => setSpace("model"));
 
   // Overlays
+  document.getElementById("btn-kin-check").addEventListener("click", () => kinCheckExact());
+  document.getElementById("btn-kin-reset").addEventListener("click", () => kinResetButton());
+
   // Baugruppe: Pose, Explosion, alle/keine Teile
   document.getElementById("pose-select").addEventListener("change", (e) => setAssemblyPose(Number(e.target.value)));
   document.getElementById("explode-slider").addEventListener("input", (e) => {
@@ -2253,6 +2292,8 @@ function enterOrLeaveAssemblyMode(projectChanged) {
   document.getElementById("assembly-panel").classList.toggle("hidden", !asm);
   document.getElementById("versions-block").classList.toggle("hidden", asm);
   document.getElementById("space-group").classList.toggle("hidden", asm);
+  document.getElementById("tool-bewegen").classList.toggle("hidden", !(asm && kinData()));
+  if (!(asm && kinData()) && S.tool === "bewegen") setTool("orbit");
   if (asm) {
     if (S.asm.prevViewMode === null) S.asm.prevViewMode = S.viewMode;
     S.viewMode = "model"; // Baugruppen-Koordinaten = „Modell“-Raum (kein Druckbett)
@@ -2265,12 +2306,16 @@ function enterOrLeaveAssemblyMode(projectChanged) {
         if (idx < 0 && /^\d+$/.test(urlPose) && Number(urlPose) < posen.length) idx = Number(urlPose);
       }
       S.asm.pose = idx >= 0 ? idx : 0;
+      S.kin.selected = new Set();
+      S.kin.bvh = new Map();
+      kinResetToPose();
       const urlExplode = Number(new URLSearchParams(window.location.search).get("explode"));
       S.asm.explode = Number.isFinite(urlExplode) ? Math.min(Math.max(urlExplode, 0), 100) : 0;
       S.asm.hidden = new Set();
       document.getElementById("explode-slider").value = String(S.asm.explode);
       document.getElementById("explode-value").textContent = `${S.asm.explode} %`;
     }
+    if (!S.kin.moved) kinResetToPose();
   } else if (S.asm.prevViewMode !== null) {
     S.viewMode = S.asm.prevViewMode;
     S.asm.prevViewMode = null;
@@ -2517,7 +2562,9 @@ async function buildAssemblyScene(stale) {
 
   S.partBounds = box.isEmpty() ? null : box;
   applyAssemblyVisibility();
-  applyExplosion();
+  if (S.kin.moved) kinApplyToMeshes();
+  else applyExplosion();
+  kinHighlight();
 }
 
 function applyAssemblyVisibility() {
@@ -2557,10 +2604,13 @@ function applyExplosion() {
 async function setAssemblyPose(idx) {
   S.asm.pose = idx;
   S.measurement = null;
+  kinResetToPose();
   renderAssemblyPanel();
   renderAssemblyDiagnostics(document.getElementById("diagnostics-list"));
   await rebuildSceneGeometry(false);
   renderMeasureBox();
+  if (S.tool === "bewegen") await kinSession();
+  renderKinPanel();
 }
 
 function renderAssemblySummary() {
@@ -2651,6 +2701,7 @@ function renderAssemblyPanel() {
   });
 
   // Prüfergebnis dieser Pose
+  renderKinPanel();
   checks.innerHTML = "";
   for (const c of pose.checks) {
     const u = pose.ueberschneidungen.find((x) => `${x.a} + ${x.b}` === c.paar);
@@ -2761,6 +2812,438 @@ function renderAssemblyChecksAndSpec() {
   previewWrap.innerHTML = S.state?.render_png_url ? `<img src="${S.state.render_png_url}" alt="Baugruppe" />` : "";
   document.getElementById("model-code-view").textContent = S.state?.model_code || "";
 }
+
+// ============================================================================
+// Bewegen (Gelenke): Auswahl bewegt sich, alles andere ist fest
+// ============================================================================
+function kinData() {
+  return isAssembly() ? S.state?.assembly?.kinematik || null : null;
+}
+
+const rowToM4 = (a) => new THREE.Matrix4().set(...a);
+const m4ToRow = (m) => {
+  const e = m.elements; // spaltenweise
+  return [e[0], e[4], e[8], e[12], e[1], e[5], e[9], e[13], e[2], e[6], e[10], e[14], e[3], e[7], e[11], e[15]];
+};
+
+function globMatch(pat, name) {
+  const re = new RegExp("^" + pat.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".") + "$");
+  return re.test(name);
+}
+
+function kinBodyInfo() {
+  // Körper → {teil, url} (Netz) aus der aktuellen Pose
+  const aj = S.state.assembly;
+  const pose = asmPose();
+  const teile = Object.fromEntries(aj.teile.map((t) => [t.name, t]));
+  const info = {};
+  for (const i of pose.instanzen) info[i.name] = { teil: i.teil, url: teile[i.teil].url, geist: false };
+  for (const g of pose.geister) info[g.name] = { teil: g.name, url: g.url, geist: true };
+  return info;
+}
+
+function kinResetToPose() {
+  const pose = asmPose();
+  S.kin.poseWorld = {};
+  if (pose) {
+    for (const i of pose.instanzen) S.kin.poseWorld[i.name] = i.matrix.slice();
+    for (const g of pose.geister) S.kin.poseWorld[g.name] = g.matrix.slice();
+  }
+  S.kin.world = Object.fromEntries(Object.entries(S.kin.poseWorld).map(([k, v]) => [k, v.slice()]));
+  S.kin.mech = null;
+  S.kin.moved = false;
+  S.kin.live = null;
+  S.kin.drag = null;
+  S.kin.blocked = null;
+}
+
+function kinSkipPair(a, b) {
+  const aj = S.state.assembly;
+  const info = S.kin.info;
+  const names = (x) => [x, info[x]?.teil].filter(Boolean);
+  const pairs = [...(aj.kontakt || []).map((k) => k.paar), ...(aj.ignorieren || [])];
+  for (const [p, q] of pairs) {
+    const m = (pat, x) => names(x).some((n) => globMatch(pat, n));
+    if ((m(p, a) && m(q, b)) || (m(p, b) && m(q, a))) return true;
+  }
+  return false;
+}
+
+async function kinBVH(url) {
+  let b = S.kin.bvh.get(url);
+  if (!b) {
+    const geo = await loadSharedGeo(url);
+    b = buildBVH(geo.getAttribute("position").array);
+    S.kin.bvh.set(url, b);
+  }
+  return b;
+}
+
+// Neue Sitzung: aktuelle Lage als Start, nicht ausgewählte Körper fest
+async function kinSession() {
+  const kin = kinData();
+  if (!kin) return;
+  S.kin.info = kinBodyInfo();
+  const frozen = new Set(kin.koerper.filter((b) => !S.kin.selected.has(b)));
+  S.kin.mech = new Mechanism(kin, S.kin.world, frozen);
+  // Netze für die Kollision vorbereiten und schon vorhandene Überschneidungen merken (blockieren nicht)
+  for (const b of S.kin.mech.bodies) if (S.kin.info[b]) await kinBVH(S.kin.info[b].url);
+  S.kin.preexisting = new Set();
+  const mov = S.kin.mech.movable;
+  for (const a of mov) {
+    for (const b of S.kin.mech.bodies) {
+      if (a === b || (mov.includes(b) && b < a)) continue;
+      if (kinPairHit(a, b, S.kin.world[a], S.kin.world[b])) S.kin.preexisting.add([a, b].sort().join("|"));
+    }
+  }
+  renderKinPanel();
+}
+
+function kinPairHit(a, b, Wa, Wb) {
+  const ia = S.kin.info[a], ib = S.kin.info[b];
+  if (!ia || !ib) return null;
+  const A = S.kin.bvh.get(ia.url), B = S.kin.bvh.get(ib.url);
+  if (!A || !B) return null;
+  return meshesPenetrate(A, Wa, B, Wb, 0.02);
+}
+
+// Kollision der bewegten Körper gegen alle anderen (null = frei)
+function kinCollision() {
+  const m = S.kin.mech;
+  const moving = m.movable.filter((b) => m.moved(b, 1e-7));
+  if (!moving.length) return null;
+  const W = {};
+  for (const b of m.bodies) W[b] = moving.includes(b) ? m.worldOf(b) : S.kin.world[b];
+  for (const a of moving) {
+    for (const b of m.bodies) {
+      if (a === b || (moving.includes(b) && b < a)) continue;
+      const key = [a, b].sort().join("|");
+      if (S.kin.preexisting.has(key) || kinSkipPair(a, b)) continue;
+      const hit = kinPairHit(a, b, W[a], W[b]);
+      if (hit) return { a, b, punkt: hit.punkt };
+    }
+  }
+  return null;
+}
+
+// Einen Schritt lösen; dringt etwas ein, bis kurz vor den Kontakt zurück (Halbierung)
+function kinStep(opts) {
+  const m = S.kin.mech;
+  if (!m) return;
+  const before = m.snapshot();
+  const res = m.solve({ iters: 24, ...opts });
+  let hit = kinCollision();
+  if (hit) {
+    const after = m.snapshot();
+    let lo = 0, hi = 1;
+    for (let k = 0; k < 8; k++) {
+      const t = (lo + hi) / 2;
+      m.blend(before, after, t);
+      if (kinCollision()) hi = t;
+      else lo = t;
+    }
+    // Die schnelle Prüfung duldet 0,02 mm Eindringen (damit aufliegende Flächen gleiten können).
+    // Für das anstossende Paar die Stelle mit 0,002 mm nachsuchen, damit auch die exakte Prüfung
+    // keine Überschneidung findet – ausser es lag schon vorher so eng an.
+    const fine = () => {
+      const W = (b) => (m.movable.includes(b) ? m.worldOf(b) : S.kin.world[b]);
+      const ia = S.kin.info[hit.a], ib = S.kin.info[hit.b];
+      return meshesPenetrate(S.kin.bvh.get(ia.url), W(hit.a), S.kin.bvh.get(ib.url), W(hit.b), 0.002);
+    };
+    m.restore(before);
+    if (!fine()) {
+      let flo = 0, fhi = lo;
+      for (let k = 0; k < 10; k++) {
+        const t = (flo + fhi) / 2;
+        m.blend(before, after, t);
+        if (fine()) fhi = t;
+        else flo = t;
+      }
+      lo = flo;
+    }
+    m.blend(before, after, lo);
+    S.kin.blocked = hit;
+    flashBlocked(hit);
+  } else {
+    S.kin.blocked = null;
+  }
+  S.kin.lastRest = res.rest;
+  kinCommitVisual();
+}
+
+function kinCommitVisual() {
+  const m = S.kin.mech;
+  for (const b of m.bodies) if (m.movable.includes(b)) S.kin.world[b] = m.worldOf(b);
+  S.kin.moved = Object.keys(S.kin.world).some((b) =>
+    S.kin.world[b].some((v, i) => Math.abs(v - S.kin.poseWorld[b][i]) > 1e-6)
+  );
+  kinApplyToMeshes();
+  renderKinValues();
+}
+
+function kinApplyToMeshes() {
+  for (const grp of [meshGroup, edgesGroup, asmGhostGroup]) {
+    for (const o of grp.children) {
+      const name = o.userData?.bodyName || o.userData?.ghostName;
+      if (name && S.kin.world[name] && o.userData.baseMatrix) o.userData.baseMatrix.copy(rowToM4(S.kin.world[name]));
+    }
+  }
+  // Überschneidungen der Pose gelten für die bewegte Lage nicht mehr
+  for (const o of errorGroup.children) {
+    if (o.userData?.asmKey === "ueberschneidung" && !o.userData.live) o.visible = !S.kin.moved && !S.asm.hidden.has("ueberschneidung");
+  }
+  applyExplosion();
+  kinHighlight();
+}
+
+function kinHighlight() {
+  for (const grp of [meshGroup, asmGhostGroup]) {
+    for (const o of grp.children) {
+      if (!o.isMesh || !o.material?.emissive) continue;
+      const name = o.userData?.bodyName || o.userData?.ghostName;
+      const sel = S.tool === "bewegen" && S.kin.selected.has(name);
+      o.material.emissive.setHex(sel ? 0x2a6fdb : 0x000000);
+      o.material.emissiveIntensity = sel ? 0.3 : 1;
+    }
+  }
+}
+
+function flashBlocked(hit) {
+  const now = performance.now();
+  if (!S.kin.lastFlash || now - S.kin.lastFlash > 1500) {
+    showToast(`Anschlag: ${hit.a} ↔ ${hit.b}`);
+    S.kin.lastFlash = now;
+  }
+  clearGroup(focusPulseGroup);
+  const s = new THREE.Mesh(
+    new THREE.SphereGeometry(1.6, 16, 12),
+    new THREE.MeshBasicMaterial({ color: 0xff2e4c, transparent: true, opacity: 0.85, depthTest: false })
+  );
+  s.position.set(...hit.punkt);
+  s.renderOrder = 20;
+  focusPulseGroup.add(s);
+  if (S.flashTimer) clearTimeout(S.flashTimer);
+  S.flashTimer = setTimeout(() => clearGroup(focusPulseGroup), 1200);
+}
+
+const HAUPT_UI = { drehung: "°", schraube: "°", zylinder: "mm", schiebung: "mm" };
+
+function renderKinPanel() {
+  const panel = document.getElementById("kin-panel");
+  const kin = kinData();
+  panel.classList.toggle("hidden", !kin);
+  document.getElementById("tool-bewegen").classList.toggle("hidden", !kin);
+  if (!kin) return;
+  const info = document.getElementById("kin-info");
+  const list = document.getElementById("kin-joints");
+  const m = S.kin.mech;
+  const sel = [...S.kin.selected];
+  if (!sel.length) {
+    info.innerHTML = `Werkzeug <b>✥ Bewegen</b> (Taste 6): Teile anklicken (Umschalt = mehrere), dann ziehen oder Regler nutzen. Nicht gewählte Teile bleiben fest.`;
+  } else {
+    const dof = m ? m.dof() : "–";
+    info.innerHTML = `Ausgewählt: <b>${sel.map(escapeHtml).join(", ")}</b><br>Freiheitsgrade der Auswahl: <b>${dof}</b>${
+      dof === 0 ? " – durch Gelenke und feste Teile blockiert" : ""}`;
+  }
+  list.innerHTML = "";
+  const coords = m ? m.coords() : S.kin.lastCoords || asmPose()?.gelenkwerte || {};
+  for (const j of kin.gelenke) {
+    if (!HAUPT_UI[j.typ]) continue;
+    const active = m && (m.movable.includes(j.a) || (j.b && m.movable.includes(j.b)));
+    const unit = HAUPT_UI[j.typ];
+    const v = coords[j.name] ?? 0;
+    const lo = j.grenzen ? j.grenzen[0] : unit === "°" ? Math.min(-180, v - 180) : Math.min(-50, v - 50);
+    const hi = j.grenzen ? j.grenzen[1] : unit === "°" ? Math.max(180, v + 180) : Math.max(50, v + 50);
+    const row = document.createElement("div");
+    row.className = "kin-row" + (active ? "" : " off");
+    row.innerHTML = `<div class="kin-name" title="${escapeAttr(j.typ)}: ${escapeAttr(j.a)} ↔ ${escapeAttr(j.b || "Boden")}">${escapeHtml(j.name)}</div>
+      <input type="range" min="${lo}" max="${hi}" step="${unit === "°" ? 1 : 0.1}" value="${v}" data-joint="${escapeAttr(j.name)}" ${active ? "" : "disabled"} />
+      <span class="kin-val mono-dim" data-val="${escapeAttr(j.name)}">${v.toFixed(unit === "°" ? 1 : 2)} ${unit}</span>`;
+    list.appendChild(row);
+  }
+  list.querySelectorAll("input[data-joint]").forEach((inp) => {
+    inp.addEventListener("input", () => {
+      const m = S.kin.mech;
+      if (!m) return;
+      // in Teilschritten fahren (≤ 90° bzw. 2 mm), damit nichts durch ein Hindernis springt
+      const name = inp.dataset.joint;
+      const j = m.byName[name];
+      const from = m.coord(j), to = Number(inp.value);
+      const maxStep = HAUPT_UI[j.typ] === "°" ? 90 : 2;
+      const n = Math.max(1, Math.ceil(Math.abs(to - from) / maxStep));
+      for (let k = 1; k <= n; k++) {
+        kinStep({ drives: { [name]: from + ((to - from) * k) / n } });
+        if (S.kin.blocked) break;
+      }
+      if (S.kin.blocked) inp.value = String(m.coord(j));
+    });
+    inp.addEventListener("change", () => kinSession());
+  });
+  document.getElementById("btn-kin-check").disabled = !S.kin.moved;
+  document.getElementById("btn-kin-reset").disabled = !S.kin.moved;
+  renderKinLive();
+}
+
+function renderKinValues() {
+  const m = S.kin.mech;
+  if (!m) return;
+  const c = m.coords();
+  S.kin.lastCoords = c;
+  document.querySelectorAll("#kin-joints [data-val]").forEach((el) => {
+    const n = el.dataset.val;
+    if (c[n] === undefined) return;
+    const unit = el.textContent.trim().endsWith("°") ? "°" : "mm";
+    el.textContent = `${c[n].toFixed(unit === "°" ? 1 : 2)} ${unit}`;
+    const inp = document.querySelector(`#kin-joints input[data-joint="${CSS.escape(n)}"]`);
+    if (inp && document.activeElement !== inp) inp.value = String(c[n]);
+  });
+  document.getElementById("btn-kin-check").disabled = !S.kin.moved;
+  document.getElementById("btn-kin-reset").disabled = !S.kin.moved;
+  const st = document.getElementById("kin-status");
+  st.textContent = S.kin.blocked ? `Anschlag: ${S.kin.blocked.a} ↔ ${S.kin.blocked.b}` : S.kin.moved ? "bewegt – „Exakt prüfen“ für Überschneidungen" : "";
+  st.className = "kin-status" + (S.kin.blocked ? " blocked" : "");
+}
+
+function renderKinLive() {
+  const wrap = document.getElementById("kin-live");
+  const r = S.kin.live;
+  if (!r) {
+    wrap.innerHTML = "";
+    return;
+  }
+  if (r.error) {
+    wrap.innerHTML = `<div class="diag-item error"><div><div class="diag-title">Prüfung fehlgeschlagen</div><div class="diag-sub">${escapeHtml(r.error)}</div></div></div>`;
+    return;
+  }
+  const items = r.checks.length
+    ? r.checks.map((c) => `<div class="diag-item ${c.ok ? (c.art === "klemmkontakt" ? "warn" : "ok") : "error"}"><div><div class="diag-title">${c.ok ? "ok" : "Kollision"}</div><div class="diag-sub">${escapeHtml(c.text)}</div></div></div>`)
+    : [`<div class="diag-item ok"><div><div class="diag-title">Exakt geprüft: frei</div><div class="diag-sub">keine Überschneidung in der bewegten Lage (${r.zeit_s} s)</div></div></div>`];
+  wrap.innerHTML = items.join("");
+}
+
+async function kinCheckExact() {
+  const pose = asmPose();
+  if (!pose) return;
+  const versch = {};
+  for (const [b, W] of Object.entries(S.kin.world)) {
+    const P = S.kin.poseWorld[b];
+    if (!P || W.every((v, i) => Math.abs(v - P[i]) < 1e-9)) continue;
+    versch[b] = m4ToRow(rowToM4(W).multiply(rowToM4(P).invert()));
+  }
+  setBusy(true, "Bewegte Stellung wird exakt geprüft …");
+  try {
+    const res = await apiFetch(`/api/projects/${encodeURIComponent(S.currentProject)}/check_state`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pose: S.asm.pose, verschiebung: versch }),
+    });
+    S.kin.live = res;
+    // rote Überschneidungen der bewegten Lage zeigen
+    for (const o of [...errorGroup.children]) if (o.userData?.live) errorGroup.remove(o);
+    for (const u of res.ueberschneidungen || []) {
+      const geo = await loadSTL(u.url);
+      geo.computeVertexNormals();
+      const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
+        color: u.ok ? 0xff7a1a : 0xff2e4c, emissive: u.ok ? 0x803000 : 0xaa0018, transparent: true, opacity: 0.92,
+        depthTest: false, side: THREE.DoubleSide,
+      }));
+      mesh.renderOrder = 10;
+      mesh.userData = { live: true, asmKey: "ueberschneidung" };
+      errorGroup.add(mesh);
+      const helper = new THREE.Box3Helper(bboxOf(u.bbox).expandByScalar(0.8), u.ok ? 0xff9a3d : 0xff2e4c);
+      helper.material.depthTest = false;
+      helper.userData = { live: true, asmKey: "ueberschneidung" };
+      errorGroup.add(helper);
+    }
+    showToast(res.ok ? `✓ Exakt geprüft: frei (${res.zeit_s} s)` : `✗ ${res.checks.filter((c) => !c.ok).length} Kollision(en) in der bewegten Lage`);
+  } catch (err) {
+    S.kin.live = { error: err.message };
+  } finally {
+    setBusy(false);
+    renderKinLive();
+  }
+}
+
+async function kinResetButton() {
+  kinResetToPose();
+  for (const o of [...errorGroup.children]) if (o.userData?.live) errorGroup.remove(o);
+  kinApplyToMeshes();
+  if (S.tool === "bewegen") await kinSession();
+  renderKinPanel();
+}
+
+async function kinSelect(name, additive) {
+  if (!name) {
+    if (!additive) S.kin.selected.clear();
+  } else if (additive) {
+    if (S.kin.selected.has(name)) S.kin.selected.delete(name);
+    else S.kin.selected.add(name);
+  } else {
+    S.kin.selected = new Set([name]);
+  }
+  await kinSession();
+  kinHighlight();
+}
+
+// Zeiger-Logik für das Werkzeug „Bewegen“ (vor den übrigen Werkzeugen)
+const kinPlane = new THREE.Plane();
+function kinPointerDown(ev) {
+  if (S.tool !== "bewegen" || ev.button !== 0 || !kinData()) return false;
+  const hit = getPointerRayHit(ev.clientX, ev.clientY, false);
+  const body = hit?.onMesh ? hit.body : null;
+  S.kin.down = { x: ev.clientX, y: ev.clientY, body, shift: ev.shiftKey || ev.ctrlKey || ev.metaKey };
+  if (body && S.kin.selected.has(body) && S.kin.mech) {
+    const p = new THREE.Vector3(...hit.scene_xyz);
+    const n = camera.getWorldDirection(new THREE.Vector3());
+    kinPlane.setFromNormalAndCoplanarPoint(n, p);
+    S.kin.drag = { body, point: hit.scene_xyz, started: false };
+    controls.enabled = false;
+    canvas.setPointerCapture(ev.pointerId);
+    return true;
+  }
+  return false;
+}
+
+let kinRaf = 0;
+function kinPointerMove(ev) {
+  if (!S.kin.drag) return false;
+  const rect = canvas.getBoundingClientRect();
+  mouseNDC.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
+  mouseNDC.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
+  raycaster.setFromCamera(mouseNDC, camera);
+  const t = new THREE.Vector3();
+  if (!raycaster.ray.intersectPlane(kinPlane, t)) return true;
+  S.kin.drag.target = [t.x, t.y, t.z];
+  S.kin.drag.started = true;
+  if (!kinRaf) {
+    kinRaf = requestAnimationFrame(() => {
+      kinRaf = 0;
+      const d = S.kin.drag;
+      if (d?.target) kinStep({ drag: { body: d.body, point: d.point, target: d.target, weight: 1 }, iters: 36 });
+    });
+  }
+  return true;
+}
+
+async function kinPointerUp(ev) {
+  if (S.tool !== "bewegen" || !S.kin.down) return false;
+  const down = S.kin.down;
+  S.kin.down = null;
+  const dragged = S.kin.drag?.started;
+  if (S.kin.drag) {
+    S.kin.drag = null;
+    controls.enabled = true;
+    try { canvas.releasePointerCapture(ev.pointerId); } catch { /* egal */ }
+  }
+  if (dragged) {
+    await kinSession(); // neue Ausgangslage für den nächsten Zug
+    return true;
+  }
+  if (Math.hypot(ev.clientX - down.x, ev.clientY - down.y) <= 5) await kinSelect(down.body, down.shift);
+  return true;
+}
+
+Object.assign(window.__studio, { kinSelect, setAssemblyPose }); // Test-Hook
 
 function handleResize() {
   const w = container.clientWidth;
