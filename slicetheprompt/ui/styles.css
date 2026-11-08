@@ -35,7 +35,7 @@ html, body {
 
 #app-shell {
   display: grid;
-  grid-template-columns: 276px 1fr 364px;
+  grid-template-columns: 276px minmax(0, 1fr) 364px;
   grid-template-rows: 1fr 32px;
   width: 100vw;
   height: 100vh;
@@ -1147,3 +1147,63 @@ button {
 .hidden {
   display: none !important;
 }
+
+/* ==================== Baugruppe ==================== */
+.asm-row {
+  display: grid;
+  grid-template-columns: auto 1fr 44px;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+.asm-row .field-label { margin: 0; }
+.asm-row .range-xs { width: 100%; }
+.asm-sub { margin-top: 12px; }
+.asm-head-actions { display: inline-flex; gap: 4px; }
+.asm-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 34vh;
+  overflow-y: auto;
+}
+.asm-item {
+  display: grid;
+  grid-template-columns: 16px 14px 1fr auto;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 6px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.asm-item:hover { background: var(--bg-hover); }
+.asm-item.off { opacity: 0.45; }
+.asm-item input { margin: 0; }
+.asm-item .legend-swatch { width: 12px; height: 12px; border-radius: 3px; }
+.asm-item .legend-swatch.ghost { opacity: 0.5; border: 1px dashed var(--text-muted); }
+.asm-item .legend-swatch.overlap { background: var(--red); }
+.asm-item .asm-meta { color: var(--text-muted); font-family: var(--mono); font-size: 11px; }
+.asm-checks { display: flex; flex-direction: column; gap: 4px; overflow-y: auto; }
+.asm-checks .diag-item { padding: 5px 8px; }
+.asm-gaps { margin-top: 4px; font-size: 11px; color: var(--text-muted); }
+.asm-gaps td { padding: 1px 4px; }
+.asm-gaps td.mono { font-family: var(--mono); text-align: right; }
+
+/* ==================== Bewegen (Gelenke) ==================== */
+.kin-info { font-size: 11.5px; color: var(--text-muted); line-height: 1.45; margin-bottom: 6px; }
+.kin-info b { color: var(--text-main); }
+.kin-joints { display: flex; flex-direction: column; gap: 4px; }
+.kin-row { display: grid; grid-template-columns: 92px 1fr 62px; align-items: center; gap: 6px; font-size: 11.5px; }
+.kin-row.off { opacity: 0.4; }
+.kin-row input[type="range"] { width: 100%; }
+.kin-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kin-val { text-align: right; font-size: 11px; }
+.kin-status { min-height: 16px; font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+.kin-status.blocked { color: #f87171; font-weight: 600; }
+.kin-actions { display: flex; gap: 6px; margin: 6px 0; }
+
+/* Baugruppen-Panel: als Ganzes scrollen statt Legende zu quetschen */
+#assembly-panel { overflow-y: auto; }
+#assembly-panel > * { flex-shrink: 0; }
+#assembly-panel .asm-legend { max-height: none; overflow: visible; }

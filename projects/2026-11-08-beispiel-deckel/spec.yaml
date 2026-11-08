@@ -1,0 +1,18 @@
+# Beispiel für Baugruppen: Steckdeckel zu projects/2026-11-04-beispiel-box-m3
+name: beispiel-deckel
+beschreibung: "Steckdeckel 60 × 40 mm für die Beispiel-Box: Platte 2 mm, umlaufender Steckrand 4 mm hoch"
+material: pla
+qualitaet: standard
+menge: 1
+koerper: null
+wand_soll: null
+filament: null
+bbox: [60, 40, 6]
+bbox_tol: 0.05
+masse:
+  - "Platte 60 × 40 × 2 mm = Aussenmass der Box (beispiel-box-m3)"
+  - "Steckrand aussen 55,6 × 35,6 mm = Box innen 56 × 36 minus 2 × 0,2 Spiel (fit), mit outer() kalibriert"
+  - "Steckrand Wand 1,6 mm, Höhe 4 mm"
+annahmen:
+  - "Deckel wird mit der Platte nach unten gedruckt (Rand zeigt nach oben)"
+  - "Dient als Beispiel für die Baugruppe projects/2026-11-08-beispiel-baugruppe-box"

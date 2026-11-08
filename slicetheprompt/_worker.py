@@ -15,8 +15,10 @@ import traceback
 
 
 def _funcs() -> dict:
-    from . import history, pipeline
+    from . import assembly, history, pipeline
     return {
+        "build_assembly": assembly.build_assembly,
+        "check_state": assembly.check_state,
         "run_all": pipeline.run_all,
         "check": pipeline.check,
         "render": pipeline.render,

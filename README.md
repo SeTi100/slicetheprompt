@@ -85,6 +85,87 @@ Toleranzen:
 | <img src="docs/images/09-schablone.webp" alt="Schablone mit vier Scheiben auf dem Druckbett"> | **z = 0:** Zahnprofil von Rad und Ritzel mit D-Bohrung, um den Eingriff zu prüfen. **z = 16:** beide Naben Ø 16 mit D-Bohrung, um zu prüfen, ob die 5-mm-Welle sitzt. Die Scheiben liegen nebeneinander auf dem Bett. |
 | <img src="docs/images/10-schablone-ghost.webp" alt="Ghost-Vergleich zweier Schablonen-Versionen"> | **👻 Ghost.** Eine ältere Version halbtransparent über die aktuelle legen. Hier v001 (nur z = 0, orange) über v002 (z = 0 und 16, blau): sofort sichtbar, was dazugekommen ist und wie sich die Anordnung verschoben hat. |
 
+### Baugruppen: mehrere Teile zusammen ansehen und prüfen
+
+Besteht etwas aus mehreren Teilen (Halter + Schlitten + Knöpfe, Box + Deckel), beschreibt eine
+**Baugruppe** in `projects/<datum>-<name>/assembly.py`, welche Teil-Projekte dazugehören, wie jedes
+Teil aus seiner Drucklage in die Baugruppe gesetzt wird und welche **Stellungen (Posen)** es gibt,
+z. B. die Endlagen eines Verstellwegs. Bezugskörper, die nicht gedruckt werden (Handy, Okular,
+Schrauben), kommen als halbtransparente **Geister** dazu.
+
+```
+/baugruppe teleskop-halter 1–5, Posen: Endlagen xe 7/57, ye 6/22 und Mitte, Handy S21/S26 als Geist
+```
+
+`build_assembly` (CLI: `uv run slicetheprompt baugruppe <projekt>`) lädt je Teil `out/model.step`,
+setzt die Teile in jeder Pose zusammen, misst jede Überschneidung exakt (Volumen, Eindringtiefe) und den
+kleinsten Abstand je Paar. Gewollter Klemmkontakt (z. B. Lippe drückt 0,1 mm ins Handy) wird mit
+`KONTAKT = {("Handyschale", "Handy"): 0.3}` erlaubt, alles andere über 0,5 mm³ ist ein Fehler.
+
+| | |
+| --- | --- |
+| <img src="docs/images/11-baugruppe.webp" alt="Beispiel-Baugruppe Box mit Deckel, Pose verkantet, Überschneidung rot"> | **Baugruppe im Studio.** Jedes Teil in eigener Farbe, Legende mit Ein/Aus je Teil, Posen-Auswahl ohne Neubau, Explosions-Regler, Geister durchscheinend, Überschneidungen rot (erlaubter Klemmkontakt orange) – ein Klick auf die Meldung fliegt hin. Schnitt und Messen funktionieren wie beim Einzelteil. Hier die mitgelieferte Beispiel-Baugruppe `beispiel-baugruppe-box` in der absichtlich falschen Pose „verkantet“: der Deckelrand steckt 265,9 mm³ in der Boxwand. |
+
+Ausprobieren:
+
+```powershell
+uv run slicetheprompt run beispiel-box-m3
+uv run slicetheprompt run beispiel-deckel
+uv run slicetheprompt baugruppe beispiel-baugruppe-box     # Exit 2: Pose „verkantet“ kollidiert (gewollt)
+uv run slicetheprompt ui --project beispiel-baugruppe-box  # …/?project=…&pose=2&explode=30 geht auch
+```
+
+Das Format in Kürze (vollständig im Kopf von `slicetheprompt/assembly.py`):
+
+```python
+from slicetheprompt.assembly import *
+DECKEL = parameter("2026-11-08-beispiel-deckel")        # Masse aus dem Kopf von model.py
+TEILE = {"Box": Teil("2026-11-04-beispiel-box-m3"), "Deckel": Teil("2026-11-08-beispiel-deckel")}
+POSEN = {"zu": {"heben": 0}, "offen": {"heben": 25}}
+def platzierung(p):                                       # Drucklage -> Baugruppe, je Teil ein Tf
+    return {"Box": pos(), "Deckel": pos(0, 0, 17 + p["heben"]) * rot(180, 0, 0)}
+def geister(p):
+    return {"Schraube": Geist(Cylinder(1.5, 8), lage=pos(25, 15, 0))}
+```
+
+`pos`, `rot`, `spiegel("XZ")` lassen sich mit `*` verketten (auch gespiegelt gedruckte Teile).
+`out/assembly.json` enthält je Pose nur Matrizen, Farben und Prüfergebnisse; die Teile liegen je einmal
+als STL in `out/assembly/`. Für Agenten gibt es zusätzlich `out/render.png` der ersten Pose.
+
+#### Bewegen mit Gelenken
+
+Mit `GELENKE` wird aus der Baugruppe ein Mechanismus. Jedes Gelenk nimmt Freiheitsgrade weg – die
+möglichen Bewegungen ergeben sich daraus, ohne eigene Formel je Mechanismus. Ein Löser (gedämpfte
+kleinste Quadrate über alle Teile) hält die Gelenke ein, auch in geschlossenen Ketten wie Kurbeltrieb
+oder Viergelenk.
+
+| Gelenk | bleibt frei |
+| --- | --- |
+| `Fest(a)` / `Fest(a, b)` | nichts (a ist Boden bzw. starr an b) |
+| `Drehung(a, b, achse, punkt)` | 1 Drehung |
+| `Schiebung(a, b, achse)` | 1 Verschiebung |
+| `Zylinder(a, b, achse, punkt)` | Drehung + Verschiebung |
+| `Kugel(a, b, punkt)` | 3 Drehungen |
+| `Ebene(a, b, normale, punkt)` | 2 Verschiebungen + Drehung |
+| `Schraube(a, b, achse, punkt, steigung)` | Drehung, Vorschub = Steigung je Umdrehung |
+| `Getriebe(gelenk_a, gelenk_b, verhaeltnis)` | koppelt zwei Gelenke (Zahnrad, Zahnstange, Riemen) |
+
+`grenzen=(min, max)` setzt Anschläge (mm bzw. Grad, 0 = Grundstellung = erste Pose). Posen können
+auch Gelenkwerte sein: `POSEN = {"90°": {"gelenke": {"Kurbel": 90}}}` – `build_assembly` löst sie und
+prüft sie exakt. Passt eine Pose aus `platzierung()` nicht zu den Gelenken, steht das in den Hinweisen.
+
+| | |
+| --- | --- |
+| <img src="docs/images/12-bewegen.webp" alt="Kurbeltrieb im Studio, Kurbel auf 125° gedreht"> | **✥ Bewegen (Taste 6).** Teile anklicken (Umschalt = mehrere) und ziehen oder am Regler drehen: Die Auswahl folgt nur ihren Gelenken, Nicht-Gewähltes bleibt fest – sitzt es auf einem gewählten Teil (Knopf auf der Schale), fährt es starr mit; die Anzeige nennt die verbleibenden Freiheitsgrade. Stösst ein bewegtes Teil an, bleibt es am Kontakt stehen („Anschlag: Knopf 1 ↔ Okularklemme“); aufliegende Flächen dürfen gleiten. „Exakt prüfen“ rechnet die bewegte Stellung mit dem CAD-Kern nach. Hier das Beispiel `beispiel-kurbeltrieb`: Kurbel auf 125°, Kolbenweg −33,75 mm – genau der Wert aus der Kurbeltrieb-Formel, ohne dass sie irgendwo steht. |
+
+```powershell
+uv run slicetheprompt run beispiel-kurbeltrieb-rahmen     # … -kurbel, -pleuel, -kolben ebenso
+uv run slicetheprompt baugruppe beispiel-kurbeltrieb
+```
+
+Grenzen: Es wird geometrisch bewegt, nicht mit Kräften gerechnet (keine Reibung, keine Klemmkraft);
+Gewinde wirken nur als Kopplung Drehung ↔ Vorschub.
+
 ### Der Kreislauf
 
 ```
@@ -285,6 +366,7 @@ und Claude Desktop einfach den Wunsch beschreiben („Konstruiere einen Wandhalt
 | `/drucken schwarz` oder `/drucken T1C` | mit genau dieser Spule (Farbe oder CFS-Platz) |
 | `/status` | Fortschritt, Temperaturen, Restzeit |
 | `/kalibrieren pla` | Toleranz-Testteil drucken, messen, Werte übernehmen |
+| `/baugruppe halter-basis, halter-schlitten, 6× knopf` | Baugruppe anlegen, Teile platzieren, Posen auf Kollision prüfen, im Studio zeigen |
 | `/schablone halter` oder `/stencil halter` | dünne Scheibe (2 mm) aus dem Teil als schneller Passungs-Testdruck; z. B. `/schablone halter bei z 0 und 12` |
 | freier Text | z. B. „Mach den Halter 5 mm höher und druck ihn nochmal“ |
 | `/teil Namensschild 60 × 25 mm, weiss mit schwarzer Schrift „TIM“` | zweifarbig über das CFS |
@@ -321,10 +403,10 @@ slicetheprompt liest das CFS über Moonraker: Platz (T1A–T4D), Material, Farbe
 | `slicetheprompt/` | Prüfung, Render, Slicen, CFS, Drucker (MCP-Server und CLI) |
 | `slicetheprompt/ui/`, `start-studio.bat` | SliceThePrompt Studio (lokale Web-Oberfläche, three.js) |
 | `docs/images/` | Screenshots für diese README |
-| `.claude/` | Befehle `/teil`, `/drucken`, `/status`, `/kalibrieren`, `/schablone` (`/stencil`) und Freigaberegeln für Claude Code |
+| `.claude/` | Befehle `/teil`, `/drucken`, `/status`, `/kalibrieren`, `/schablone` (`/stencil`), `/baugruppe` und Freigaberegeln für Claude Code |
 | `.agents/skills/` | dieselben Abläufe als Skills für Codex und Antigravity |
 | `.mcp.json` | startet slicetheprompt für Claude Code über `uv` (ohne absolute Pfade) |
-| `projects/<datum>-<name>/` | je Teil: `spec.yaml`, `model.py`, `out/` mit STEP, STL, PNG, G-Code |
+| `projects/<datum>-<name>/` | je Teil: `spec.yaml`, `model.py`, `out/` mit STEP, STL, PNG, G-Code; je Baugruppe: `assembly.py`, `out/assembly.json` |
 
 ## Ohne KI-Agent (Kommandozeile)
 
@@ -333,6 +415,8 @@ uv run slicetheprompt ui                       # SliceThePrompt Studio (3D, Fehl
 uv run slicetheprompt new halter --material petg
 uv run slicetheprompt run <projekt>            # bauen, prüfen, rendern
 uv run slicetheprompt schablone <projekt> --z 0 12 --hoehe 2   # Passungs-Testdruck (Alias: stencil)
+uv run slicetheprompt baugruppe-neu <name> <teil1> <teil2> …   # Baugruppe anlegen (assembly.py)
+uv run slicetheprompt baugruppe <projekt>      # Baugruppe zusammensetzen + Kollisionen je Pose
 uv run slicetheprompt slice <projekt>          # gibt einen Freigabe-Token aus
 uv run slicetheprompt print <token>            # hochladen und starten
 uv run slicetheprompt status

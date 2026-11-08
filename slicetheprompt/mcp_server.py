@@ -30,6 +30,7 @@ slicetheprompt erzeugt druckfertige Teile für den Creality Hi Combo (0,4-mm-Dü
 Ablauf: project_new → spec.yaml und model.py schreiben → build_and_check → Render ansehen →
 cfs_status/filament_plan → slice → Nutzer bestätigt mit 'drucken' → upload_and_print(token).
 Mehrfarbig: in model.py `bodies = {name: Körper}`, Spule je Körper in spec.yaml → filament.
+Baugruppe (mehrere Teil-Projekte zusammen ansehen/prüfen): assembly_new → assembly.py → build_assembly.
 Regeln und Toleranzen: config/printer.yaml (und calibration.yaml). Nie ohne ausdrückliche Bestätigung drucken.
 """
 
@@ -137,6 +138,26 @@ def stencil(project: str, z: list[float] | None = None, height: float = 2.0) -> 
     Stifte und Aussenmasse in XY bleiben exakt wie im Original. z dort wählen, wo die Passungen liegen
     (Hinweise in `features_z`). Baut, prüft und rendert sofort; danach PNG ansehen und normal slicen."""
     return _worker("new_stencil", project, z or [0.0], height)
+
+
+@server.tool()
+def build_assembly(project: str) -> dict:
+    """Baugruppe bauen und prüfen (Projekt mit assembly.py statt model.py): lädt je Teil out/model.step,
+    setzt die Teile in jeder Pose (POSEN) zusammen, misst Überschneidungen exakt (rote STLs) und den
+    kleinsten Abstand je Paar, prüft erlaubte Klemmkontakte (KONTAKT) und schreibt out/assembly.json
+    sowie out/render.png (erste Pose). Mit GELENKE in assembly.py werden Posen mit Gelenkwerten gelöst
+    und Platzierungen gegen die Gelenke geprüft (Hinweise). Teile vorher einzeln mit build_and_check bauen.
+    Danach das PNG ansehen; im Studio lassen sich alle Posen ohne Neubau umschalten."""
+    return _worker("build_assembly", project)
+
+
+@server.tool()
+def assembly_new(name: str, parts: list[str], description: str = "") -> dict:
+    """Baugruppen-Projekt projects/<datum>-<name>/ mit assembly.py-Vorlage anlegen.
+    parts: Teil-Projekte (Namen unter projects/). Danach platzierung/POSEN/geister ausfüllen
+    und build_assembly aufrufen."""
+    from .assembly import new_assembly
+    return _safe(new_assembly, name, parts, description)
 
 
 @server.tool()

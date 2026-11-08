@@ -12,14 +12,14 @@ Der Nutzer ist kein CAD-Profi: erkläre Masse und Annahmen in Alltagssprache.
   bzw. `… install antigravity`): `project_new`, `build_and_check`, `check_report`, `render_views`, `cfs_status`,
   `list_filaments`, `filament_plan`, `slice`, `printer_status`, `upload_and_print`, `print_control`,
   `calibration_part`, `apply_calibration`, `get_config`, `project_list`, `get_ui_feedback`, `clear_ui_feedback`,
-  `version_list`, `version_restore`, `doctor`, `stencil`.
+  `version_list`, `version_restore`, `doctor`, `stencil`, `assembly_new`, `build_assembly`.
 - Gleiche Funktionen als CLI (falls der MCP-Server hängt oder noch nicht neu geladen ist):
   `uv run slicetheprompt <befehl>`, z. B. `config`, `new`, `run`, `schablone`, `cfs`, `slice`.
 - **3D-GUI (`SliceThePrompt`):** `uv run slicetheprompt ui` (`http://127.0.0.1:8765`) zeigt 3D-Modell, Versionen
   und Fehlerzonen. Markiert der Nutzer dort Stellen per Pin/Box/Pfeil, liefert `get_ui_feedback` die exakten
   Modellkoordinaten (`model_xyz`, `delta_model_mm`, `bbox_model`) samt Screenshot `out/ui_feedback.png`;
   nach dem Umbau `clear_ui_feedback` aufrufen.
-- Abläufe: `teil`, `drucken`, `kalibrieren`, `status`, `schablone` (Claude Code: `.claude/commands/`,
+- Abläufe: `teil`, `drucken`, `kalibrieren`, `status`, `schablone`, `baugruppe` (Claude Code: `.claude/commands/`,
   andere: `.agents/skills/` – Änderungen in beiden nachziehen).
 - CAD: **build123d** (Python, OpenCascade). Bausteine mit Toleranzen in `lib/parts.py`, Zahnräder in
   `lib/gears.py`. `get_config` listet unter `bausteine` alle Funktionen mit Kurzbeschreibung –
@@ -96,6 +96,33 @@ Der Nutzer ist kein CAD-Profi: erkläre Masse und Annahmen in Alltagssprache.
 - Nach jedem Teil mit Passungen (Lager, Bohrung für Welle, Lochbild, Zahneingriff) von sich aus eine
   Schablone anbieten.
 
+## Baugruppe (mehrere Teile zusammen, Ablauf `baugruppe`)
+- Eigenes Projekt mit `assembly.py` statt `model.py` (`assembly_new(name, parts)`, CLI
+  `uv run slicetheprompt baugruppe-neu <name> <teil…>`). Wird nicht gedruckt, nur angesehen und geprüft.
+- `TEILE = {Name: Teil(projekt, anzahl=…, farbe=…, explosion=(x, y, z))}`, `POSEN = {Name: {Werte}}`,
+  `platzierung(p)` → je Teil `Tf` (bei `anzahl > 1` Liste) **von der Drucklage** (`out/model.step`) ins
+  Baugruppen-System: `pos`, `rot`, `spiegel("XZ")`, verkettet mit `*`. Die Umkehrung der letzten Zeilen
+  von `model.py` (z. B. `part = mirror(Pos(0,0,H) * k)` → `pos(0,0,-H) * spiegel("XZ")`) einmal als
+  Konstante notieren. Masse der Teile mit `parameter(projekt)` lesen, nie abschreiben.
+- `geister(p)` → `{Name: Geist(form, lage=Tf, farbe=…, folgt="Teil")}` für Bezugskörper (Handy, Okular,
+  Schrauben). `KONTAKT = {("Teil", "Geist"): 0.3}` erlaubt Eindringen bis 0,3 mm (Klemmkontakt),
+  sonst gilt jede Überschneidung über `GRENZE_MM3` (0,5) als Fehler. `IGNORIEREN` für bewusste Paare.
+- `build_assembly(project)` nach jedem Umbau eines Teils (erst das Teil mit `build_and_check`). Danach
+  `out/render.png` ansehen und je Pose melden: frei / Klemmkontakt (Tiefe) / Kollision (Paar, mm³).
+  Bei Kollision Teile nicht stillschweigend ändern, sondern Ursache und Vorschlag nennen.
+- **Gelenke** (`GELENKE = [...]`) statt fester Stellungen, wenn sich etwas bewegt: `Fest(a)` (Boden),
+  `Fest(a, b)`, `Drehung`, `Schiebung`, `Zylinder`, `Kugel`, `Ebene`, `Schraube(…, steigung=0.7)`,
+  `Getriebe(gelenk_a, gelenk_b, verhaeltnis)`, je mit `grenzen=(min, max)`. Achsen und Punkte in
+  Baugruppen-Koordinaten der Grundstellung (= erste Pose). Keine Formeln für Mechanismen schreiben –
+  der Löser ergibt Kurbeltrieb, Viergelenk usw. selbst. Posen dürfen Gelenkwerte sein:
+  `{"gelenke": {"Kurbel": 90}}`. Hinweis „Pose … verletzt Gelenk …“ heisst: platzierung() und
+  GELENKE passen nicht zusammen → Achse/Punkt prüfen.
+- Studio zeigt Baugruppen mit Posen-Auswahl, Explosion, Ein/Aus je Teil; mit Gelenken zusätzlich
+  **✥ Bewegen** (Auswahl folgt ihren Gelenken, Rest fest, Teile auf einem gewählten Träger fahren mit,
+  Anschlag bei Kontakt bzw. bei der KONTAKT-Tiefe, „Exakt prüfen“).
+  `get_ui_feedback` enthält die Pose (`pose`) und bei bewegten Teilen `gelenkwerte`; Koordinaten sind
+  Baugruppen-Koordinaten.
+
 ## Mehrfarbig
 - model.py definiert `bodies = {"name": Körper, …}` statt `part`. Körper dürfen sich **nicht
   überschneiden**: Einlage aus dem Grundkörper abziehen (`grund = grund - einlage`). slicetheprompt misst
@@ -150,6 +177,7 @@ Zuerst `doctor` aufrufen: prüft Drucker, CFS, Slicer und CAD und richtet den Sl
 frischen `git clone` selbst ein (Creality Print suchen, Hi-Profile auflösen).
 Du darfst `slicetheprompt/` reparieren (z. B. Slicer-Aufruf, Profilauswahl in `config/slicer.yaml`).
 Danach `uv run python tests/test_meshcheck.py`, `uv run python tests/test_cfs_3mf.py` und (bei Änderungen
-an `lib/`) `uv run python tests/test_lib.py` ausführen
+an `lib/`) `uv run python tests/test_lib.py`, bei Baugruppen/Gelenken `tests/test_assembly.py` und
+`tests/test_kinematics.py` ausführen
 und den Nutzer informieren, dass der MCP-Server neu verbunden werden muss: Claude Code `/mcp` →
 slicetheprompt → reconnect, Codex neu starten, Antigravity **Customizations → MCP Servers → Refresh**.

@@ -9,7 +9,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
-from matplotlib.colors import to_rgb  # noqa: E402
+from matplotlib.colors import to_rgba  # noqa: E402
 from matplotlib.patches import Patch  # noqa: E402
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection  # noqa: E402
 
@@ -23,17 +23,19 @@ VIEWS = [
 ]
 
 
-def _shade(tris: np.ndarray, base) -> np.ndarray:
+def _shade(tris: np.ndarray, base, alpha: float = 1.0) -> np.ndarray:
     n = face_normals(tris)
     light = np.array([0.4, -0.6, 0.7])
     light /= np.linalg.norm(light)
     k = 0.45 + 0.55 * np.clip(n @ light, 0, 1)
     base = np.array(base)
-    return np.clip(base[None] * k[:, None] + 0.04, 0, 1)
+    rgb = np.clip(base[None] * k[:, None] + 0.04, 0, 1)
+    return np.hstack([rgb, np.full((len(rgb), 1), alpha)])
 
 
 def render(parts, out: str | Path, title: str = "", bed: dict | None = None, max_tris: int = 120_000) -> Path:
-    """parts: Dreiecks-Array ODER Liste von (Dreiecke, Farbe, Name)."""
+    """parts: Dreiecks-Array ODER Liste von (Dreiecke, Farbe, Name). Farbe mit Alpha (RGBA-Tupel)
+    zeichnet durchscheinend (z. B. Geisterkörper einer Baugruppe)."""
     if isinstance(parts, np.ndarray):
         parts = [(parts, "#4682B4", None)]
     total = sum(len(p[0]) for p in parts)
@@ -42,12 +44,13 @@ def render(parts, out: str | Path, title: str = "", bed: dict | None = None, max
         if total > max_tris:
             k = max(1, int(len(tris) * max_tris / total))
             tris = tris[np.random.default_rng(0).choice(len(tris), k, replace=False)]
-        rgb = to_rgb(color)
+        rgba = to_rgba(color)
+        rgb = rgba[:3]
         # sehr helle Farben (weiss) etwas abdunkeln, damit sie vor dem Hintergrund sichtbar sind
         if min(rgb) > 0.85:
             rgb = tuple(c * 0.88 for c in rgb)
         tris_all.append(tris)
-        cols_all.append(_shade(tris, rgb))
+        cols_all.append(_shade(tris, rgb, rgba[3]))
     tris = np.concatenate(tris_all)
     colors = np.concatenate(cols_all)
     pts = tris.reshape(-1, 3)
@@ -83,7 +86,7 @@ def render(parts, out: str | Path, title: str = "", bed: dict | None = None, max
     fig.suptitle(f"{title}   {dims}".strip(), fontsize=12)
     labels = [(n, c) for _, c, n in parts if n]
     if labels:
-        fig.legend(handles=[Patch(facecolor=c, edgecolor="k", label=n) for n, c in labels],
+        fig.legend(handles=[Patch(facecolor=to_rgba(c), edgecolor="k", label=n) for n, c in labels],
                    loc="lower center", ncol=min(len(labels), 6), fontsize=9)
     fig.tight_layout(rect=(0, 0.04 if labels else 0, 1, 1))
     out = Path(out)

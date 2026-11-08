@@ -176,6 +176,13 @@ def main(argv=None) -> int:
                    help="Schnitthöhe(n) im Original in mm (Standard 0 = Unterseite)")
     s.add_argument("--hoehe", "--height", type=lambda v: float(v.replace(",", ".")), default=2.0,
                    help="Dicke je Scheibe in mm (Standard 2)")
+    s = sub.add_parser("baugruppe", aliases=["assembly"],
+                       help="Baugruppe (assembly.py) bauen: Teile platzieren, Kollisionen je Pose prüfen")
+    s.add_argument("project")
+    s = sub.add_parser("baugruppe-neu", aliases=["assembly-new"], help="Baugruppen-Projekt mit assembly.py anlegen")
+    s.add_argument("name")
+    s.add_argument("teile", nargs="+", help="Teil-Projekte (Namen unter projects/)")
+    s.add_argument("--desc", default="")
     s = sub.add_parser("slice")
     s.add_argument("project")
     s.add_argument("--material")
@@ -252,6 +259,14 @@ def main(argv=None) -> int:
             _out(pipeline.run_all(a.project, a.orient))
         elif a.cmd in ("schablone", "stencil"):
             _out(pipeline.new_stencil(a.project, a.z, a.hoehe))
+        elif a.cmd in ("baugruppe", "assembly"):
+            from .assembly import build_assembly
+            res = build_assembly(a.project)
+            _out(res)
+            return 0 if res["ok"] else 2
+        elif a.cmd in ("baugruppe-neu", "assembly-new"):
+            from .assembly import new_assembly
+            _out(new_assembly(a.name, a.teile, a.desc))
         elif a.cmd == "slice":
             from .mcp_server import _parse_map
             _out(jobs.slice_project(a.project, a.material, a.quality, _parse_map(a.filament or ""),
