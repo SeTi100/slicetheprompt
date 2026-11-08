@@ -413,12 +413,18 @@ def render(project: str, which: str = "print", colors: dict | None = None) -> di
     return {"png": str(png)}
 
 
-def run_all(project: str, orientation: str | None = None, reason: str = "build_and_check") -> dict:
-    """Bauen, (optional) Lage wählen, prüfen, rendern – ein Durchlauf."""
+def run_all(project: str, orientation: str | None = None, reason: str = "build_and_check",
+            also_assembly: str = "", clear_feedback: bool = False) -> dict:
+    """Bauen, (optional) Lage wählen, prüfen, rendern – ein Durchlauf.
+    Optional bei Erfolg (`passed=True`): Baugruppe `also_assembly` direkt mitbauen und UI-Feedback löschen."""
     from .assembly import build_assembly, is_assembly
     d = project_dir(project)
     if is_assembly(d) and not (d / "model.py").exists():
-        return {"stage": "baugruppe", **build_assembly(project)}
+        res = {"stage": "baugruppe", **build_assembly(project)}
+        if clear_feedback and res.get("ok"):
+            from .ui_server import clear_project_feedback
+            res["feedback_cleared"] = clear_project_feedback(d)
+        return res
     b = build(project)
     if not b.get("ok"):
         return {"stage": "build", **b}
@@ -427,10 +433,21 @@ def run_all(project: str, orientation: str | None = None, reason: str = "build_a
     r = check(project)
     from . import history
     snap = history.save_snapshot(project, reason=reason)
-    return {"stage": "done",
-            "build": {k: b.get(k) for k in ("size_mm", "volume_mm3", "solids", "valid", "checks", "bodies")},
-            "orientation": p["orientation"], "report": _short(r), "png": img["png"],
-            "version": snap["version"]}
+    out = {"stage": "done",
+           "build": {k: b.get(k) for k in ("size_mm", "volume_mm3", "solids", "valid", "checks", "bodies")},
+           "orientation": p["orientation"], "report": _short(r), "png": img["png"],
+           "version": snap["version"]}
+    if r.get("passed"):
+        if also_assembly:
+            asm_res = build_assembly(also_assembly)
+            out["assembly"] = asm_res
+        if clear_feedback:
+            from .ui_server import clear_project_feedback
+            cleared = [clear_project_feedback(d)]
+            if also_assembly:
+                cleared.append(clear_project_feedback(project_dir(also_assembly)))
+            out["feedback_cleared"] = cleared
+    return out
 
 
 def _short(r: dict) -> dict:

@@ -394,6 +394,116 @@ def clear_project_feedback(d: Path) -> dict[str, Any]:
     return {"ok": True, "project": d.name, "removed": removed}
 
 
+def _enrich_feedback_for_agent(d: Path, data: dict[str, Any]) -> None:
+    """Ergänzt UI-Feedback um Zielprojekt-Pfade und transformiert Baugruppen-Koordinaten in Drucklage."""
+    asm_json_path = d / "out" / "assembly.json"
+    if asm_json_path.exists():
+        data["project_kind"] = "assembly"
+        import numpy as np
+
+        aj = _read_json(asm_json_path) or {}
+        part_to_project = {
+            t["name"]: t["projekt"]
+            for t in (aj.get("teile") or [])
+            if isinstance(t, dict) and "name" in t and "projekt" in t
+        }
+
+        posen = aj.get("posen") or []
+        wanted_pose = data.get("pose")
+        pose_obj: dict[str, Any] = {}
+        if wanted_pose:
+            for p in posen:
+                if isinstance(p, dict) and p.get("name") == wanted_pose:
+                    pose_obj = p
+                    break
+        if not pose_obj and posen:
+            first = posen[0]
+            if isinstance(first, dict):
+                pose_obj = first
+
+        inst_mats: dict[str, tuple[str, np.ndarray]] = {}
+        for inst in (pose_obj.get("instanzen") or []):
+            if isinstance(inst, dict) and "matrix" in inst and "teil" in inst:
+                try:
+                    mat = np.asarray(inst["matrix"], dtype=float).reshape(4, 4)
+                    t_name = inst["teil"]
+                    if "name" in inst and inst["name"]:
+                        inst_mats[str(inst["name"])] = (t_name, mat)
+                    inst_mats[str(t_name)] = (t_name, mat)
+                except Exception:
+                    pass
+
+        for ann in (data.get("annotations") or []):
+            if not isinstance(ann, dict):
+                continue
+            pname = ann.get("part")
+            if pname and pname in inst_mats:
+                teil_key, mat = inst_mats[pname]
+                try:
+                    inv_m = np.linalg.inv(mat)
+                except Exception:
+                    continue
+
+                t_proj = part_to_project.get(teil_key)
+                if t_proj:
+                    ann["target_project"] = t_proj
+                    t_dir = d.parent / t_proj
+                    ann["target_model_py"] = str((t_dir / "model.py").resolve())
+                    ann["target_spec_yaml"] = str((t_dir / "spec.yaml").resolve())
+
+                def _tf_pt(pt: list[float] | tuple[float, ...]) -> list[float]:
+                    p = inv_m @ np.array([pt[0], pt[1], pt[2], 1.0], dtype=float)
+                    return [round(float(v), 2) for v in p[:3]]
+
+                if isinstance(ann.get("model_xyz"), list) and len(ann["model_xyz"]) == 3:
+                    ann["part_print_xyz"] = _tf_pt(ann["model_xyz"])
+
+                if (
+                    isinstance(ann.get("from_model_xyz"), list)
+                    and isinstance(ann.get("to_model_xyz"), list)
+                    and len(ann["from_model_xyz"]) == 3
+                    and len(ann["to_model_xyz"]) == 3
+                ):
+                    p0 = _tf_pt(ann["from_model_xyz"])
+                    p1 = _tf_pt(ann["to_model_xyz"])
+                    ann["part_print_from_xyz"] = p0
+                    ann["part_print_to_xyz"] = p1
+                    ann["part_print_delta_mm"] = [round(p1[i] - p0[i], 2) for i in range(3)]
+
+                bbox_m = ann.get("bbox_model")
+                if isinstance(bbox_m, dict):
+                    mn = bbox_m.get("min")
+                    mx = bbox_m.get("max")
+                    if (
+                        isinstance(mn, list)
+                        and isinstance(mx, list)
+                        and len(mn) == 3
+                        and len(mx) == 3
+                    ):
+                        corners = [
+                            _tf_pt([x, y, z])
+                            for x in (mn[0], mx[0])
+                            for y in (mn[1], mx[1])
+                            for z in (mn[2], mx[2])
+                        ]
+                        bmin = [round(min(c[i] for c in corners), 2) for i in range(3)]
+                        bmax = [round(max(c[i] for c in corners), 2) for i in range(3)]
+                        bsize = [round(bmax[i] - bmin[i], 2) for i in range(3)]
+                        ann["part_bbox_print"] = {"min": bmin, "max": bmax, "size": bsize}
+    else:
+        data["project_kind"] = "part"
+        data["target_project"] = d.name
+        data["target_model_py"] = str((d / "model.py").resolve())
+        data["target_spec_yaml"] = str((d / "spec.yaml").resolve())
+
+    data["hint"] = (
+        "Sieh dir `screenshot` mit read_file an. "
+        "Bei Baugruppen enthalten die Annotationen bereits `target_project`, `part_print_xyz` und `part_bbox_print` "
+        "(exakt umgerechnet in die Drucklage out/model.step des Einzelteils – keine eigene Matrix-Inversion nötig!). "
+        "Nutze nach dem Editieren `build_and_check(project=..., also_assembly=..., clear_feedback=True)`."
+    )
+
+
 def read_project_feedback(project: str = "", projects_root: Path = PROJECTS_DIR) -> dict[str, Any]:
     """Liest ui_feedback.json eines Projekts (oder des zuletzt markierten Projekts)."""
     if project:
@@ -417,10 +527,12 @@ def read_project_feedback(project: str = "", projects_root: Path = PROJECTS_DIR)
     data = json.loads(fb_path.read_text(encoding="utf-8"))
     data["ok"] = True
     data["has_feedback"] = True
-    data["hint"] = (
-        "Sieh dir zusätzlich das markierte Screenshot-Bild unter `screenshot` mit Read/read_file an. "
-        "Nutze `model_xyz` / `delta_model_mm` / `bbox_model` direkt für Änderungen in `model.py` und "
-        "rufe nach erfolgreichem `build_and_check` `clear_ui_feedback` auf."
+    _enrich_feedback_for_agent(d, data)
+    (
+        # Hinweis wird in _enrich_feedback_for_agent gesetzt
+
+
+
     )
     return data
 

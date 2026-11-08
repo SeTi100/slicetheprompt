@@ -15,7 +15,9 @@ Erzeuge ein druckfertiges, masshaltiges Teil für den Creality Hi Combo nach `AG
    (`project_list`), deren `spec.yaml` für gemeinsame Masse lesen. Bei Änderungen an einem bestehenden Projekt
    prüfen, ob räumliches Feedback aus `SliceThePrompt` vorliegt (`get_ui_feedback`). Falls ja: `screenshot`
    (`out/ui_feedback.png`) ansehen, `model_xyz` / `delta_model_mm` / `bbox_model` umsetzen und nach erfolgreichem
-   Umbau `clear_ui_feedback` aufrufen.
+   Umbau `clear_ui_feedback` aufrufen. Bei Baugruppen liefert `get_ui_feedback` `part_print_xyz` / `part_bbox_print`
+   und `target_project` direkt in Drucklage mit; `build_and_check(..., also_assembly=..., clear_feedback=True)`
+   baut und räumt in einem Schritt auf.
 2. **Fehlende Masse:** Fehlt Kritisches, genau **eine** gebündelte Rückfrage stellen und warten. Merkliste je Teiltyp:
    - Halter/Gehäuse/Aufnahme: Masse des Geräts (L × B × H), Spiel gewünscht?, Befestigung (Schraube, Klebeband, Klemmen), Kabel-/Tastenöffnungen.
    - Zahnrad/Getriebe: Modul, Zähnezahlen, Achsabstand, Wellen-Ø (rund/D-Welle), Befestigung (Madenschraube, Pressen), Zahnbreite.

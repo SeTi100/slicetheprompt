@@ -123,6 +123,17 @@ Der Nutzer ist kein CAD-Profi: erkläre Masse und Annahmen in Alltagssprache.
   `get_ui_feedback` enthält die Pose (`pose`) und bei bewegten Teilen `gelenkwerte`; Koordinaten sind
   Baugruppen-Koordinaten.
 
+## Fast-Path für 3D-UI-Feedback (Pflichtablauf ohne Suchschleifen)
+Wenn der Nutzer 3D-Feedback aus `SliceThePrompt` umsetzen lässt (`get_ui_feedback`), gilt dieser strikte 5-Schritte-Fast-Path:
+1. **Ein Aufruf für Kontext + Bild:** `get_ui_feedback(project="<name>")` aufrufen und `out/ui_feedback.png` mit `read_file` ansehen.
+   - Bei **Baugruppen** liefert `get_ui_feedback` in jeder Annotation bereits fertig rücktransformierte Koordinaten in der Drucklage des Einzelteils (`target_project`, `target_model_py`, `target_spec_yaml`, `part_print_xyz`, `part_bbox_print`, `part_print_delta_mm`). **Keine eigene 4×4-Matrix-Inversion rechnen!**
+   - Beachte nur eine eventuelle Drehung/Spiegelung in den letzten Zeilen von `model.py` (z. B. `part = mirror(Pos(0,0,H) * k)`), falls du vor dieser Zeile schneidest – oder schneide direkt am fertigen `part` in Drucklage (vor `bottom_chamfer`).
+2. **Direkt Ziel-Dateien lesen:** Nur `target_model_py` (`model.py`) und `target_spec_yaml` (`spec.yaml`) lesen. **Verboten:** `git log`, `git grep`, `find` oder `Get-ChildItem` nach alten Spezifikationen/TODOs im Repo.
+3. **Kleine Edits:** In `edit_file` unter Windows (CRLF) immer kurze Zielblöcke (1–4 Zeilen Kontext) verwenden. Ist eine Box-Markierung viel grösser als das Feature (z. B. 49×28 mm Box für ein einzelnes Loch) und kollidiert die Box-Mitte mit einer Nut/Rippe, wähle die freieste Stelle innerhalb der Box (oder frage in 1 Satz nach, statt lange zu grübeln).
+4. **Kombi-Build in einem Aufruf:** `build_and_check(project="<teil>", also_assembly="<baugruppe>", clear_feedback=True)` baut das Teil, aktualisiert bei `passed=True` sofort die Baugruppe und löscht das erledigte Feedback in **einem** Schritt.
+5. **Sichtkontrolle & Kurzbericht:** `out/render.png` (Teil und ggf. Baugruppe) mit `read_file` ansehen und Ergebnis knapp melden.
+- **Kein Task-Polling:** Bei `run_command` für Tests `WaitMsBeforeAsync: 10000` nutzen. Läuft ein Befehl im Hintergrund, Turn beenden (System weckt automatisch auf) – nie `manage_task(status)` in einer Schleife aufrufen.
+
 ## Mehrfarbig
 - model.py definiert `bodies = {"name": Körper, …}` statt `part`. Körper dürfen sich **nicht
   überschneiden**: Einlage aus dem Grundkörper abziehen (`grund = grund - einlage`). slicetheprompt misst

@@ -26,3 +26,4 @@ Auftrag: $ARGUMENTS
    Hinweise (veraltete Teile). Bei Kollision die Teile **nicht** selbst ändern, sondern Ursache und
    Vorschlag nennen. Ende mit dem Studio-Link:
    `uv run slicetheprompt ui --project <baugruppe>` → `http://127.0.0.1:8765/?project=<baugruppe>`.
+   Bei 3D-Feedback auf einer Baugruppe (`get_ui_feedback`) direkt `target_project` und `part_print_xyz` / `part_bbox_print` aus den Annotationen nutzen und mit `build_and_check(project=target_project, also_assembly=baugruppe, clear_feedback=True)` in einem Schritt bauen.

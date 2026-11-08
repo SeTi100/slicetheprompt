@@ -9,7 +9,9 @@ Auftrag: $ARGUMENTS
 1. **Vorbereiten:** `get_config` lesen – `bausteine` listet alle Funktionen aus `lib/`, die Dateien nicht extra
    öffnen. Gehört das Teil zu bestehenden Projekten (`project_list`), deren `spec.yaml` für gemeinsame Masse lesen.
    Bei Änderungen an einem bestehenden Projekt `get_ui_feedback` prüfen (falls vorhanden: `screenshot` mit Read
-   ansehen, `model_xyz` / `delta_model_mm` / `bbox_model` umsetzen, nach erfolgreichem Build `clear_ui_feedback`).
+   ansehen, `model_xyz` / `delta_model_mm` / `bbox_model` umsetzen, nach erfolgreichem Build `clear_ui_feedback`;
+   bei Baugruppen werden `part_print_xyz` / `part_bbox_print` und `target_project` direkt mitgeliefert und
+   `build_and_check(..., also_assembly=..., clear_feedback=True)` baut und räumt in einem Schritt auf).
 2. **Fehlende Masse:** Fehlt Kritisches, **eine** gebündelte Rückfrage stellen und warten. Merkliste je Teiltyp:
    - Halter/Gehäuse/Aufnahme: Masse des Geräts (L × B × H), Spiel gewünscht?, Befestigung (Schraube, Klebeband, Klemmen), Kabel-/Tastenöffnungen.
    - Zahnrad/Getriebe: Modul, Zähnezahlen, Achsabstand, Wellen-Ø (rund/D-Welle), Befestigung (Madenschraube, Pressen), Zahnbreite.

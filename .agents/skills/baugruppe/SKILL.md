@@ -29,3 +29,4 @@ description: >-
 5. **Melden** je Pose: frei / Klemmkontakt mit Tiefe / Kollision (Paar, mm³), engste Spalte, Hinweise.
    Bei Kollision Teile nicht selbst ändern, sondern Ursache und Vorschlag nennen.
    Studio: `uv run slicetheprompt ui --project <baugruppe>` (Pose per `&pose=<Nr>`).
+   Bei 3D-Feedback auf einer Baugruppe (`get_ui_feedback`) direkt `target_project` und `part_print_xyz` / `part_bbox_print` aus den Annotationen nutzen und mit `build_and_check(project=target_project, also_assembly=baugruppe, clear_feedback=True)` in einem Schritt bauen.

@@ -19,7 +19,10 @@ CFG = {
 }
 
 
-def test_cube_closed_and_sized(tmp_path=Path("/tmp")):
+import tempfile
+def test_cube_closed_and_sized(tmp_path=None):
+    if tmp_path is None:
+        tmp_path = Path(tempfile.gettempdir())
     t = box(20, 20, 20)
     p = tmp_path / "cube.stl"
     write_stl(p, t)

@@ -122,12 +122,15 @@ def project_list() -> dict:
 
 
 @server.tool()
-def build_and_check(project: str, orientation: str = "wie modelliert") -> dict:
+def build_and_check(project: str, orientation: str = "wie modelliert",
+                    also_assembly: str = "", clear_feedback: bool = False) -> dict:
     """model.py ausführen (build123d), STEP+STL exportieren, Drucklage festlegen, gegen
     printer.yaml und spec.yaml prüfen und out/render.png erzeugen.
     orientation: 'wie modelliert' (Standard), 'auto' oder 'kopfüber (X 180°)', 'X +90°', 'X -90°', 'Y +90°', 'Y -90°'.
+    also_assembly: optionaler Baugruppen-Projektname, der bei passed=True sofort mitgebaut wird.
+    clear_feedback: bei passed=True erledigtes 3D-UI-Feedback automatisch löschen.
     Danach IMMER das PNG mit dem Read-Tool ansehen."""
-    return _worker("run_all", project, orientation)
+    return _worker("run_all", project, orientation, "build_and_check", also_assembly, clear_feedback)
 
 
 @server.tool()

@@ -167,6 +167,14 @@ def test_inlay_depth_and_stroke():
     assert "[schrift] Einlage-Tiefe" in fehler and "[schrift] Strichbreite (1. Perzentil)" in fehler
 
 
+def test_extended_screw_and_tripod_sizes():
+    for sz in ("M2.5", "M8", "M10", "M12", "1/4", "1/4-20", "3/8", "3/8-16"):
+        c = parts.screw_hole_cut(sz, 5)
+        cb = parts.counterbore_cut(sz, 12)
+        nt = parts.nut_trap_cut(sz)
+        assert c.volume > 0 and cb.volume > c.volume and nt.volume > 0
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

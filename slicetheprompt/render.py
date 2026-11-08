@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
-import matplotlib
+from .config import STATE_DIR
+
+_MPL_DIR = STATE_DIR / "matplotlib"
+_MPL_DIR.mkdir(parents=True, exist_ok=True)
+os.environ.setdefault("MPLCONFIGDIR", str(_MPL_DIR))
+
+import matplotlib  # noqa: E402
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402

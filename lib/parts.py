@@ -23,12 +23,16 @@ _MATERIAL = _CFG.get("default_material", "pla")
 WARNINGS: list[str] = []          # wird vom Build in build.json übernommen
 FEATURES: list[dict] = []         # semantisches Feature-Tagging
 
-# Durchgangslöcher (ISO 273, fein) und Sechskantmuttern (Schlüsselweite, Höhe)
-SCREW_CLEARANCE = {"M2": 2.2, "M2.5": 2.7, "M3": 3.2, "M4": 4.3, "M5": 5.3, "M6": 6.4}
+# Durchgangslöcher (ISO 273, fein + UNC Fotogewinde 1/4"-20, 3/8"-16) und Sechskantmuttern (Schlüsselweite, Höhe)
+SCREW_CLEARANCE = {"M2": 2.2, "M2.5": 2.7, "M3": 3.2, "M4": 4.3, "M5": 5.3, "M6": 6.4, "M8": 8.4, "M10": 10.5, "M12": 13.0,
+                   "1/4": 6.6, "1/4-20": 6.6, "3/8": 9.8, "3/8-16": 9.8}
 NUT = {"M2": (4.0, 1.6), "M2.5": (5.0, 2.0), "M3": (5.5, 2.4), "M4": (7.0, 3.2), "M5": (8.0, 4.0),
-       "M6": (10.0, 5.0)}
-HEAD_D = {"M2": 3.8, "M2.5": 4.5, "M3": 5.5, "M4": 7.0, "M5": 8.5, "M6": 10.0}   # Zylinderkopf ISO 4762
-HEAD_H = {"M2": 2.0, "M2.5": 2.5, "M3": 3.0, "M4": 4.0, "M5": 5.0, "M6": 6.0}
+       "M6": (10.0, 5.0), "M8": (13.0, 6.5), "M10": (16.0, 8.0), "M12": (18.0, 10.0),
+       "1/4": (11.1, 5.5), "1/4-20": (11.1, 5.5), "3/8": (14.3, 8.0), "3/8-16": (14.3, 8.0)}
+HEAD_D = {"M2": 3.8, "M2.5": 4.5, "M3": 5.5, "M4": 7.0, "M5": 8.5, "M6": 10.0, "M8": 13.0, "M10": 16.0, "M12": 18.0,
+          "1/4": 9.5, "1/4-20": 9.5, "3/8": 14.3, "3/8-16": 14.3}   # Zylinderkopf ISO 4762 / UNC
+HEAD_H = {"M2": 2.0, "M2.5": 2.5, "M3": 3.0, "M4": 4.0, "M5": 5.0, "M6": 6.0, "M8": 8.0, "M10": 10.0, "M12": 12.0,
+          "1/4": 6.35, "1/4-20": 6.35, "3/8": 9.5, "3/8-16": 9.5}
 _C = (Align.CENTER, Align.CENTER, Align.MIN)
 
 
