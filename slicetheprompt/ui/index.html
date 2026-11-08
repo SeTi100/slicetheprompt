@@ -40,7 +40,31 @@
         </div>
       </div>
 
-      <div class="section-block flex-grow">
+      <!-- Baugruppe (nur bei Projekten mit assembly.py) -->
+      <div id="assembly-panel" class="section-block flex-grow hidden">
+        <div class="section-header">
+          <label for="pose-select">Stellung (Pose)</label>
+          <span id="pose-status" class="badge badge-neutral">–</span>
+        </div>
+        <select id="pose-select" class="select-input"></select>
+        <div class="asm-row">
+          <label for="explode-slider" class="field-label">Explosion</label>
+          <input type="range" id="explode-slider" min="0" max="100" value="0" class="range-xs" />
+          <span id="explode-value" class="mono-dim">0 %</span>
+        </div>
+        <div class="section-header asm-sub">
+          <span>Teile</span>
+          <span class="asm-head-actions">
+            <button id="btn-asm-all" class="btn-xs" title="Alle Teile einblenden">alle</button>
+            <button id="btn-asm-none" class="btn-xs" title="Alle Teile ausblenden">keine</button>
+          </span>
+        </div>
+        <div id="assembly-legend" class="asm-legend"></div>
+        <div class="section-header asm-sub"><span>Kollisionsprüfung dieser Pose</span></div>
+        <div id="assembly-checks" class="asm-checks"></div>
+      </div>
+
+      <div id="versions-block" class="section-block flex-grow">
         <div class="section-header">
           <span>Versions-Historie</span>
           <button id="btn-open-diff" class="btn-xs" title="Code-Diff zwischen Versionen anzeigen">⇄ Code-Diff</button>
@@ -76,7 +100,7 @@
 
         <div class="toolbar-divider"></div>
 
-        <div class="tool-group" role="group" aria-label="Koordinatenraum">
+        <div id="space-group" class="tool-group" role="group" aria-label="Koordinatenraum">
           <button id="btn-space-print" class="seg-btn active" title="Drucklage auf dem 260×260-mm-Bett">Druckbett</button>
           <button id="btn-space-model" class="seg-btn" title="Modellkoordinaten aus model.py (Ursprung 0,0,0)">Modell (0,0,0)</button>
         </div>

@@ -20,7 +20,7 @@ import webbrowser
 
 import yaml
 
-from . import history, meshcheck as mc, params as params_mod, pipeline
+from . import assembly as asm_mod, history, meshcheck as mc, params as params_mod, pipeline
 from .config import PROJECTS_DIR, load_config, project_dir
 from .moonraker import Moonraker
 
@@ -88,6 +88,9 @@ def list_projects_summary(projects_root: Path = PROJECTS_DIR) -> list[dict[str, 
         return items
 
     for d in sorted(projects_root.iterdir()):
+        if d.is_dir() and asm_mod.is_assembly(d) and not (d / "model.py").exists():
+            items.append(_assembly_summary(d))
+            continue
         if not d.is_dir() or not (d / "model.py").exists():
             continue
         out = d / "out"
@@ -129,8 +132,102 @@ def list_projects_summary(projects_root: Path = PROJECTS_DIR) -> list[dict[str, 
     return items
 
 
+def _assembly_summary(d: Path) -> dict[str, Any]:
+    """Listeneintrag für eine Baugruppe (assembly.py statt model.py)."""
+    aj = _read_json(d / "out" / "assembly.json") or {}
+    mtimes = [p.stat().st_mtime for p in (d / asm_mod.ASSEMBLY_FILE, d / "out" / "assembly.json",
+                                          d / "out" / "ui_feedback.json") if p.exists()]
+    bb = aj.get("bbox")
+    errors = sum(1 for p in aj.get("posen") or [] for c in p.get("checks") or [] if not c.get("ok"))
+    return {
+        "project": d.name,
+        "kind": "assembly",
+        "beschreibung": aj.get("beschreibung") or "",
+        "material": "",
+        "built": bool(aj),
+        "passed": aj.get("ok") if aj else None,
+        "errors_count": errors,
+        "warnings_count": len(aj.get("hinweise") or []),
+        "size_mm": [round(bb[1][i] - bb[0][i], 2) for i in range(3)] if bb else None,
+        "bodies": [t["name"] for t in aj.get("teile") or []] or None,
+        "pose_count": len(aj.get("posen") or []),
+        "version_count": 0,
+        "latest_version": None,
+        "has_feedback": (d / "out" / "ui_feedback.json").exists(),
+        "mtime": max(mtimes) if mtimes else 0.0,
+    }
+
+
+def build_assembly_state(d: Path) -> dict[str, Any]:
+    """Zustand einer Baugruppe: assembly.json mit URLs zu den Teil-, Geister- und Überschneidungs-STLs."""
+    cfg = load_config()
+    out = d / "out"
+    aj = _read_json(out / "assembly.json") or {}
+    src = d / asm_mod.ASSEMBLY_FILE
+    stamp = int((out / "assembly.json").stat().st_mtime * 1000) if (out / "assembly.json").exists() else 0
+    base = f"/api/projects/{urllib.parse.quote(d.name)}/files/out"
+
+    def url(rel: str) -> str:
+        return f"{base}/{urllib.parse.quote(rel)}?t={stamp}"
+
+    if aj:
+        for t in aj.get("teile") or []:
+            t["url"] = url(t["stl"])
+        for p in aj.get("posen") or []:
+            for g in p.get("geister") or []:
+                g["url"] = url(g["stl"])
+            for u in p.get("ueberschneidungen") or []:
+                u["url"] = url(u["stl"])
+    bed_cfg = cfg.get("printer", {}).get("bed", {"x": 260, "y": 260, "z": 300})
+    return {
+        "kind": "assembly",
+        "project": d.name,
+        "version": None,
+        "latest_version": None,
+        "is_historical": False,
+        "assembly": aj or None,
+        "spec": {},
+        "model_code": src.read_text(encoding="utf-8") if src.exists() else "",
+        "params": [],
+        "build": {},
+        "print_info": {},
+        "report": {},
+        "diagnostics": {},
+        "feedback": _read_json(out / "ui_feedback.json"),
+        "versions": [],
+        "colors": {},
+        "meshes": [],
+        "ghost_meshes": [],
+        "full_print_stl_url": None,
+        "full_model_stl_url": None,
+        "render_png_url": f"{base}/render.png?t={stamp}" if (out / "render.png").exists() else None,
+        "printer_bed": {"x": bed_cfg.get("x", 260), "y": bed_cfg.get("y", 260), "z": bed_cfg.get("z", 300),
+                        "usable_xy": cfg.get("rules", {}).get("max_part_xy", [250, 250])},
+        "orientations": [],
+    }
+
+
+def _run_assembly_worker(d: Path) -> dict[str, Any]:
+    """build_assembly im eigenen Prozess (OCC-Last nicht im UI-Server)."""
+    import os
+    import subprocess
+    import sys
+    proc = subprocess.run([sys.executable, "-m", "slicetheprompt._worker", "build_assembly", json.dumps([str(d)])],
+                          cwd=str(Path(__file__).resolve().parents[1]), capture_output=True, text=True,
+                          encoding="utf-8", errors="replace", timeout=900,
+                          env={**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"})
+    try:
+        res = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        return {"ok": False, "error": f"build_assembly: keine gültige Antwort (Exit {proc.returncode})",
+                "stderr": proc.stderr[-2000:]}
+    return {"stage": "baugruppe" if res.get("ok") is not None and "error" not in res else "fehler", **res}
+
+
 def build_project_state(d: Path, version: str | None = None) -> dict[str, Any]:
     """Baut das vollständige Zustandspaket eines Projekts (aktuell oder historische Version)."""
+    if asm_mod.is_assembly(d) and not (d / "model.py").exists():
+        return build_assembly_state(d)
     cfg = load_config()
     versions = history.list_versions(str(d))
     latest_version = versions[-1]["version"] if versions else None
@@ -272,6 +369,7 @@ def save_project_feedback(d: Path, payload: dict[str, Any]) -> dict[str, Any]:
         "based_on_version": based_on,
         "created_at": dt.datetime.now().isoformat(timespec="seconds"),
         "view_mode": payload.get("view_mode") or "print",
+        "pose": payload.get("pose"),
         "general_note": (payload.get("general_note") or "").strip(),
         "screenshot": str(png_path) if png_path.exists() else None,
         "annotations": payload.get("annotations") or [],
@@ -361,6 +459,8 @@ def _projects_watch_signature(projects_root: Path) -> dict[str, float]:
             p.stat().st_mtime
             for p in (
                 d / "model.py",
+                d / asm_mod.ASSEMBLY_FILE,
+                out / "assembly.json",
                 d / "spec.yaml",
                 out / "build.json",
                 out / "report.json",
@@ -624,6 +724,13 @@ class StudioHandler(BaseHTTPRequestHandler):
                     params_mod.update_params(d / "model.py", clean_updates)
                     run_res = pipeline.run_all(str(d), orient, reason="ui_param_edit")
                 self._send_json({"ok": run_res.get("stage") == "done", "run": run_res, "state": build_project_state(d)})
+                return
+
+            if action == "rebuild" and asm_mod.is_assembly(d) and not (d / "model.py").exists():
+                with lock:
+                    run_res = _run_assembly_worker(d)
+                self._send_json({"ok": run_res.get("stage") == "baugruppe", "run": run_res,
+                                 "state": build_project_state(d)})
                 return
 
             if action == "rebuild":

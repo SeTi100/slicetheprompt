@@ -29,6 +29,16 @@ const S = {
   measurement: null,       // { a_model, b_model, a_print, b_print, dist, delta_model }
   partBounds: null,        // THREE.Box3 of active meshes in current viewMode
   flashTimer: null,
+  // Baugruppe (Projekt mit assembly.py): Pose, Explosion, ausgeblendete Teile, Netz-Cache
+  asm: {
+    pose: 0,
+    explode: 0,
+    hidden: new Set(),
+    vectors: {},
+    geoCache: new Map(),   // url -> Promise<BufferGeometry> (Pose wechseln ohne Neuladen)
+    edgeCache: new Map(),  // url -> EdgesGeometry
+    prevViewMode: null,
+  },
 };
 
 const stlLoader = new STLLoader();
@@ -105,9 +115,11 @@ const featureGroup = new THREE.Group();
 const annotationGroup = new THREE.Group();
 const previewGroup = new THREE.Group();
 const focusPulseGroup = new THREE.Group();
+const asmGhostGroup = new THREE.Group();   // Geisterkörper einer Baugruppe (durchscheinend)
 
 scene.add(
   envGroup,
+  asmGhostGroup,
   meshGroup,
   edgesGroup,
   errorGroup,
@@ -211,7 +223,7 @@ function fmtVec(arr) {
 function clearGroup(group) {
   while (group.children.length > 0) {
     const obj = group.children.pop();
-    if (obj.geometry) obj.geometry.dispose();
+    if (obj.geometry && !obj.userData?.sharedGeo) obj.geometry.dispose();
     if (obj.material) {
       if (Array.isArray(obj.material)) obj.material.forEach((m) => m.dispose());
       else obj.material.dispose();
@@ -227,6 +239,11 @@ function buildEnvironment() {
   const bed = S.state?.printer_bed || { x: 260, y: 260, z: 300, usable_xy: [250, 250] };
   const bx = bed.x || 260;
   const by = bed.y || 260;
+
+  if (isAssembly()) {
+    buildAssemblyEnvironment();
+    return;
+  }
 
   if (S.viewMode === "print") {
     // Creality Hi 260x260 Build Plate ([0..260, 0..260, z=0])
@@ -341,9 +358,22 @@ async function rebuildSceneGeometry(fitCameraAfter = false) {
   clearGroup(errorGroup);
   clearGroup(ghostCutGroup);
   clearGroup(featureGroup);
+  clearGroup(asmGhostGroup);
 
   if (!S.state) return;
   buildEnvironment();
+
+  if (isAssembly()) {
+    await buildAssemblyScene(stale);
+    if (stale()) return;
+    edgesGroup.visible = S.overlays.edges;
+    errorGroup.visible = S.overlays.errors;
+    rebuildAnnotationVisuals();
+    updateClipPlane();
+    renderSceneLegend();
+    if (fitCameraAfter && S.partBounds) setCameraPreset("iso");
+    return;
+  }
 
   const meshesInfo = S.state.meshes || [];
   const overallBox = new THREE.Box3();
@@ -606,6 +636,9 @@ function updateClipPlane() {
   errorGroup.traverse((o) => {
     if (o.material) o.material.clippingPlanes = planes;
   });
+  asmGhostGroup.traverse((o) => {
+    if (o.material) o.material.clippingPlanes = planes;
+  });
 
   if (isOff || !S.partBounds) return;
 
@@ -706,7 +739,7 @@ function getPointerRayHit(clientX, clientY, allowBedFallback = false) {
   mouseNDC.y = -((clientY - rect.top) / rect.height) * 2 + 1;
   raycaster.setFromCamera(mouseNDC, camera);
 
-  const targets = [...meshGroup.children, ...ghostCutGroup.children.filter((c) => c.isMesh)];
+  const targets = [...meshGroup.children, ...ghostCutGroup.children.filter((c) => c.isMesh)].filter((o) => o.visible);
   const hits = raycaster.intersectObjects(targets, false);
 
   if (hits.length > 0) {
@@ -1249,7 +1282,9 @@ async function loadProjectsList(selectProjectName = null) {
     opt.value = p.project;
     const statusIcon = p.passed === true ? "✓" : p.passed === false ? "✗" : "•";
     const fbIcon = p.has_feedback ? " 📌" : "";
-    opt.textContent = `${statusIcon} ${p.project}${fbIcon}`;
+    const kind = p.kind === "assembly" ? "🧩 " : "";
+    opt.textContent = `${statusIcon} ${kind}${p.project}${fbIcon}`;
+    if (p.kind === "assembly") opt.title = `Baugruppe: ${(p.bodies || []).join(", ")} · ${p.pose_count || 0} Posen`;
     sel.appendChild(opt);
   }
 
@@ -1282,6 +1317,7 @@ async function selectProject(projName, version = null, fitCam = true) {
   const state = await apiFetch(`/api/projects/${encodeURIComponent(projName)}/state${q}`);
   if (req !== selectSeq) return; // inzwischen anderes Projekt/andere Version gewählt
   S.state = state;
+  enterOrLeaveAssemblyMode(projectChanged);
 
   // Restore saved open feedback annotations when switching to project live view
   if (projectChanged) {
@@ -1315,6 +1351,10 @@ async function selectProject(projName, version = null, fitCam = true) {
 }
 
 function renderProjectSummary() {
+  if (isAssembly()) {
+    renderAssemblySummary();
+    return;
+  }
   const rep = S.state?.report || {};
   const badge = document.getElementById("project-status-badge");
   const dimsEl = document.getElementById("project-dims-text");
@@ -1417,6 +1457,10 @@ function renderVersionList() {
 function renderDiagnosticsList() {
   const wrap = document.getElementById("diagnostics-list");
   wrap.innerHTML = "";
+  if (isAssembly()) {
+    renderAssemblyDiagnostics(wrap);
+    return;
+  }
 
   const rep = S.state?.report || {};
   const diag = S.state?.diagnostics || {};
@@ -1685,6 +1729,10 @@ function renderParamsForm() {
 }
 
 function renderChecksAndSpec() {
+  if (isAssembly()) {
+    renderAssemblyChecksAndSpec();
+    return;
+  }
   const checksWrap = document.getElementById("checks-table-wrap");
   const checks = S.state?.report?.checks || [];
   if (!checks.length) {
@@ -1731,6 +1779,21 @@ function renderChecksAndSpec() {
 function renderSceneLegend() {
   const leg = document.getElementById("scene-legend");
   const items = [];
+  if (isAssembly()) {
+    const aj = S.state.assembly;
+    for (const t of aj?.teile || []) {
+      if (S.asm.hidden.has(`teil:${t.name}`)) continue;
+      items.push(`<span class="legend-item"><span class="legend-swatch" style="background:${t.farbe}"></span>${escapeHtml(t.name)}${t.anzahl > 1 ? ` ×${t.anzahl}` : ""}</span>`);
+    }
+    if ((asmPose()?.geister || []).length) {
+      items.push(`<span class="legend-item"><span class="legend-swatch" style="background:#9aa5b1;opacity:.5"></span>Geist (nicht gedruckt)</span>`);
+    }
+    if (S.overlays.errors && (asmPose()?.ueberschneidungen || []).length) {
+      items.push(`<span class="legend-item"><span class="legend-swatch" style="background:#ff2e4c"></span>Überschneidung</span>`);
+    }
+    leg.innerHTML = items.join("");
+    return;
+  }
   for (const m of S.state?.meshes || []) {
     items.push(`<span class="legend-item"><span class="legend-swatch" style="background:${m.color}"></span>${escapeHtml(m.name === "_teil" ? "Bauteil" : m.name)}</span>`);
   }
@@ -1761,7 +1824,8 @@ async function saveFeedbackForAgent() {
   const dataUrl = captureAnnotatedScreenshotDataUrl();
   const payload = {
     based_on_version: S.state?.version || S.state?.latest_version || null,
-    view_mode: S.viewMode,
+    view_mode: isAssembly() ? "baugruppe" : S.viewMode,
+    pose: isAssembly() ? asmPose()?.name || null : undefined,
     general_note: generalNote,
     screenshot_data_url: dataUrl,
     annotations: S.annotations,
@@ -2059,6 +2123,26 @@ function bindEvents() {
   document.getElementById("btn-space-model").addEventListener("click", () => setSpace("model"));
 
   // Overlays
+  // Baugruppe: Pose, Explosion, alle/keine Teile
+  document.getElementById("pose-select").addEventListener("change", (e) => setAssemblyPose(Number(e.target.value)));
+  document.getElementById("explode-slider").addEventListener("input", (e) => {
+    S.asm.explode = Number(e.target.value);
+    document.getElementById("explode-value").textContent = `${S.asm.explode} %`;
+    applyExplosion();
+  });
+  document.getElementById("btn-asm-all").addEventListener("click", () => {
+    S.asm.hidden = new Set();
+    applyAssemblyVisibility();
+    renderAssemblyPanel();
+    renderSceneLegend();
+  });
+  document.getElementById("btn-asm-none").addEventListener("click", () => {
+    for (const t of S.state?.assembly?.teile || []) S.asm.hidden.add(`teil:${t.name}`);
+    applyAssemblyVisibility();
+    renderAssemblyPanel();
+    renderSceneLegend();
+  });
+
   document.getElementById("chk-overlay-errors").addEventListener("change", (e) => {
     S.overlays.errors = e.target.checked;
     errorGroup.visible = S.overlays.errors;
@@ -2150,6 +2234,534 @@ function bindEvents() {
 // ============================================================================
 // Resize & Render Loop
 // ============================================================================
+// ============================================================================
+// Baugruppen-Ansicht (Projekt mit assembly.py → out/assembly.json)
+// Teile werden je Teil einmal geladen und je Pose nur über Matrizen platziert.
+// ============================================================================
+function isAssembly() {
+  return S.state?.kind === "assembly";
+}
+
+function asmPose() {
+  const posen = S.state?.assembly?.posen || [];
+  if (!posen.length) return null;
+  return posen[Math.min(Math.max(S.asm.pose, 0), posen.length - 1)];
+}
+
+function enterOrLeaveAssemblyMode(projectChanged) {
+  const asm = isAssembly();
+  document.getElementById("assembly-panel").classList.toggle("hidden", !asm);
+  document.getElementById("versions-block").classList.toggle("hidden", asm);
+  document.getElementById("space-group").classList.toggle("hidden", asm);
+  if (asm) {
+    if (S.asm.prevViewMode === null) S.asm.prevViewMode = S.viewMode;
+    S.viewMode = "model"; // Baugruppen-Koordinaten = „Modell“-Raum (kein Druckbett)
+    if (projectChanged) {
+      const urlPose = new URLSearchParams(window.location.search).get("pose");
+      const posen = S.state.assembly?.posen || [];
+      let idx = -1;
+      if (urlPose !== null) {
+        idx = posen.findIndex((p) => p.name === urlPose);
+        if (idx < 0 && /^\d+$/.test(urlPose) && Number(urlPose) < posen.length) idx = Number(urlPose);
+      }
+      S.asm.pose = idx >= 0 ? idx : 0;
+      const urlExplode = Number(new URLSearchParams(window.location.search).get("explode"));
+      S.asm.explode = Number.isFinite(urlExplode) ? Math.min(Math.max(urlExplode, 0), 100) : 0;
+      S.asm.hidden = new Set();
+      document.getElementById("explode-slider").value = String(S.asm.explode);
+      document.getElementById("explode-value").textContent = `${S.asm.explode} %`;
+    }
+  } else if (S.asm.prevViewMode !== null) {
+    S.viewMode = S.asm.prevViewMode;
+    S.asm.prevViewMode = null;
+    document.getElementById("btn-space-print").classList.toggle("active", S.viewMode === "print");
+    document.getElementById("btn-space-model").classList.toggle("active", S.viewMode === "model");
+  }
+  pruneAssemblyCache();
+}
+
+function pruneAssemblyCache() {
+  const keep = new Set();
+  const aj = S.state?.assembly;
+  if (aj) {
+    for (const t of aj.teile || []) keep.add(t.url);
+    for (const p of aj.posen || []) {
+      for (const g of p.geister || []) keep.add(g.url);
+      for (const u of p.ueberschneidungen || []) keep.add(u.url);
+    }
+  }
+  for (const [url, prom] of S.asm.geoCache) {
+    if (keep.has(url)) continue;
+    prom.then((g) => g.dispose()).catch(() => {});
+    S.asm.geoCache.delete(url);
+    const e = S.asm.edgeCache.get(url);
+    if (e) e.dispose();
+    S.asm.edgeCache.delete(url);
+  }
+}
+
+function loadSharedGeo(url) {
+  let prom = S.asm.geoCache.get(url);
+  if (!prom) {
+    prom = loadSTL(url).then((geo) => {
+      geo.computeVertexNormals();
+      geo.computeBoundingBox();
+      return geo;
+    });
+    prom.catch(() => S.asm.geoCache.delete(url));
+    S.asm.geoCache.set(url, prom);
+  }
+  return prom;
+}
+
+function sharedEdges(url, geo) {
+  let e = S.asm.edgeCache.get(url);
+  if (!e) {
+    e = new THREE.EdgesGeometry(geo, 15);
+    S.asm.edgeCache.set(url, e);
+  }
+  return e;
+}
+
+function m4(arr) {
+  const m = new THREE.Matrix4();
+  m.set(...arr);
+  return m;
+}
+
+function bboxOf(b) {
+  return new THREE.Box3(new THREE.Vector3(...b[0]), new THREE.Vector3(...b[1]));
+}
+
+// Richtung, in die jedes Teil beim Auseinanderziehen wandert: Vorgabe aus assembly.py
+// (Teil(explosion=…)) oder radial von der Baugruppenmitte weg.
+function explodeVectors(pose) {
+  const aj = S.state.assembly;
+  const teile = Object.fromEntries(aj.teile.map((t) => [t.name, t]));
+  const box = new THREE.Box3();
+  for (const i of pose.instanzen) box.union(bboxOf(i.bbox));
+  const c = box.getCenter(new THREE.Vector3());
+  const diag = box.getSize(new THREE.Vector3()).length();
+  const out = {};
+  for (const i of pose.instanzen) {
+    const t = teile[i.teil];
+    const ci = bboxOf(i.bbox).getCenter(new THREE.Vector3());
+    let v;
+    if (t?.explosion) {
+      v = new THREE.Vector3(...t.explosion);
+      if (v.lengthSq() > 0) v.normalize().multiplyScalar(diag * 0.3);
+      if (t.anzahl > 1) v.add(ci.clone().sub(c).multiplyScalar(0.4)); // gleiche Teile zusätzlich auseinander
+    } else {
+      v = ci.sub(c).multiplyScalar(0.6);
+    }
+    out[i.name] = v;
+  }
+  for (const g of pose.geister) {
+    if (g.folgt) out[g.name] = (out[g.folgt] || out[`${g.folgt} 1`] || new THREE.Vector3()).clone();
+  }
+  return out;
+}
+
+function buildAssemblyEnvironment() {
+  const aj = S.state?.assembly;
+  const bb = aj?.bbox || [[-100, -100, 0], [100, 100, 50]];
+  const z = bb[0][2] - 2;
+  const step = 10;
+  const x0 = Math.floor((bb[0][0] - 20) / step) * step;
+  const x1 = Math.ceil((bb[1][0] + 20) / step) * step;
+  const y0 = Math.floor((bb[0][1] - 20) / step) * step;
+  const y1 = Math.ceil((bb[1][1] + 20) / step) * step;
+  const pts = [];
+  for (let x = x0; x <= x1; x += step) pts.push(x, y0, z, x, y1, z);
+  for (let y = y0; y <= y1; y += step) pts.push(x0, y, z, x1, y, z);
+  const gridGeo = new THREE.BufferGeometry();
+  gridGeo.setAttribute("position", new THREE.Float32BufferAttribute(pts, 3));
+  envGroup.add(
+    new THREE.LineSegments(gridGeo, new THREE.LineBasicMaterial({ color: 0x263449, transparent: true, opacity: 0.55 }))
+  );
+  const span = Math.max(bb[1][0] - bb[0][0], bb[1][1] - bb[0][1], bb[1][2] - bb[0][2]);
+  addAxesHelper(new THREE.Vector3(0, 0, 0), Math.min(40, Math.max(12, span * 0.25)));
+}
+
+async function buildAssemblyScene(stale) {
+  const aj = S.state.assembly;
+  S.partBounds = null;
+  if (!aj || !(aj.posen || []).length) {
+    renderSceneLegend();
+    return;
+  }
+  const pose = asmPose();
+  const planes = activeClipPlanes();
+  const teile = Object.fromEntries(aj.teile.map((t) => [t.name, t]));
+
+  // Alle Netze dieser Pose (aus dem Cache, sonst einmal laden)
+  const urls = [
+    ...aj.teile.map((t) => t.url),
+    ...pose.geister.map((g) => g.url),
+    ...pose.ueberschneidungen.map((u) => u.url),
+  ];
+  const geos = {};
+  try {
+    const all = await Promise.all(urls.map((u) => loadSharedGeo(u)));
+    if (stale()) return;
+    urls.forEach((u, k) => (geos[u] = all[k]));
+  } catch (err) {
+    console.warn("Baugruppe: STL Ladefehler", err);
+    showToast("Baugruppe: Netze konnten nicht geladen werden – build_assembly erneut ausführen");
+    return;
+  }
+
+  S.asm.vectors = explodeVectors(pose);
+  const box = new THREE.Box3();
+
+  for (const inst of pose.instanzen) {
+    const t = teile[inst.teil];
+    const geo = geos[t.url];
+    const base = m4(inst.matrix);
+    const mat = new THREE.MeshStandardMaterial({
+      color: new THREE.Color(t.farbe),
+      roughness: 0.45,
+      metalness: 0.06,
+      side: THREE.DoubleSide,
+      clippingPlanes: planes,
+      clipShadows: true,
+      polygonOffset: true,
+      polygonOffsetFactor: 1,
+      polygonOffsetUnits: 1,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.matrixAutoUpdate = false;
+    mesh.matrix.copy(base);
+    mesh.userData = {
+      bodyName: inst.name,
+      teil: inst.teil,
+      sharedGeo: true,
+      baseMatrix: base,
+      explodeKey: inst.name,
+      asmKey: `teil:${inst.teil}`,
+    };
+    meshGroup.add(mesh);
+    const edges = new THREE.LineSegments(
+      sharedEdges(t.url, geo),
+      new THREE.LineBasicMaterial({ color: 0x090d16, transparent: true, opacity: 0.5, clippingPlanes: planes })
+    );
+    edges.matrixAutoUpdate = false;
+    edges.matrix.copy(base);
+    edges.userData = { ...mesh.userData };
+    edgesGroup.add(edges);
+    box.union(geo.boundingBox.clone().applyMatrix4(base));
+  }
+
+  for (const g of pose.geister) {
+    const geo = geos[g.url];
+    const base = m4(g.matrix);
+    const mesh = new THREE.Mesh(
+      geo,
+      new THREE.MeshStandardMaterial({
+        color: new THREE.Color(g.farbe),
+        transparent: true,
+        opacity: 0.2,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        roughness: 0.7,
+        clippingPlanes: planes,
+      })
+    );
+    mesh.matrixAutoUpdate = false;
+    mesh.matrix.copy(base);
+    mesh.renderOrder = 2;
+    mesh.userData = { ghostName: g.name, sharedGeo: true, baseMatrix: base, explodeKey: g.name, asmKey: `geist:${g.name}` };
+    asmGhostGroup.add(mesh);
+    const outline = new THREE.LineSegments(
+      sharedEdges(g.url, geo),
+      new THREE.LineBasicMaterial({
+        color: new THREE.Color(g.farbe).lerp(new THREE.Color(0xffffff), 0.45),
+        transparent: true,
+        opacity: 0.4,
+        clippingPlanes: planes,
+      })
+    );
+    outline.matrixAutoUpdate = false;
+    outline.matrix.copy(base);
+    outline.userData = { ...mesh.userData };
+    asmGhostGroup.add(outline);
+    box.union(geo.boundingBox.clone().applyMatrix4(base));
+  }
+
+  for (const u of pose.ueberschneidungen) {
+    const geo = geos[u.url];
+    const mesh = new THREE.Mesh(
+      geo,
+      new THREE.MeshStandardMaterial({
+        color: u.ok ? 0xff7a1a : 0xff2e4c,
+        emissive: u.ok ? 0x803000 : 0xaa0018,
+        transparent: true,
+        opacity: 0.92,
+        depthTest: false, // liegt im Inneren der Teile – immer sichtbar
+        side: THREE.DoubleSide,
+        clippingPlanes: planes,
+      })
+    );
+    mesh.matrixAutoUpdate = false;
+    mesh.renderOrder = 10;
+    mesh.userData = { sharedGeo: true, overlapPair: [u.a, u.b], asmKey: "ueberschneidung" };
+    errorGroup.add(mesh);
+    // Rahmen, damit auch winzige Überschneidungen auffallen
+    const baseBox = bboxOf(u.bbox).expandByScalar(0.8);
+    const helper = new THREE.Box3Helper(baseBox.clone(), u.ok ? 0xff9a3d : 0xff2e4c);
+    helper.material.depthTest = false;
+    helper.renderOrder = 11;
+    helper.userData = { overlapPair: [u.a, u.b], asmKey: "ueberschneidung", isHelper: true, baseBox };
+    errorGroup.add(helper);
+  }
+
+  S.partBounds = box.isEmpty() ? null : box;
+  applyAssemblyVisibility();
+  applyExplosion();
+}
+
+function applyAssemblyVisibility() {
+  for (const grp of [meshGroup, edgesGroup, asmGhostGroup, errorGroup]) {
+    for (const o of grp.children) {
+      const k = o.userData?.asmKey;
+      if (k) o.visible = !S.asm.hidden.has(k);
+    }
+  }
+}
+
+function applyExplosion() {
+  const f = S.asm.explode / 100;
+  const zero = new THREE.Vector3();
+  const off = (key) => (S.asm.vectors[key] || zero).clone().multiplyScalar(f);
+  for (const grp of [meshGroup, edgesGroup, asmGhostGroup]) {
+    for (const o of grp.children) {
+      if (!o.userData?.baseMatrix) continue;
+      const v = off(o.userData.explodeKey);
+      o.matrix.makeTranslation(v.x, v.y, v.z).multiply(o.userData.baseMatrix);
+      o.matrixWorldNeedsUpdate = true;
+    }
+  }
+  for (const o of errorGroup.children) {
+    const pair = o.userData?.overlapPair;
+    if (!pair) continue;
+    const v = off(pair[0]).add(off(pair[1])).multiplyScalar(0.5);
+    if (o.userData.isHelper) {
+      o.box.copy(o.userData.baseBox).translate(v);
+    } else {
+      o.matrix.makeTranslation(v.x, v.y, v.z);
+      o.matrixWorldNeedsUpdate = true;
+    }
+  }
+}
+
+async function setAssemblyPose(idx) {
+  S.asm.pose = idx;
+  S.measurement = null;
+  renderAssemblyPanel();
+  renderAssemblyDiagnostics(document.getElementById("diagnostics-list"));
+  await rebuildSceneGeometry(false);
+  renderMeasureBox();
+}
+
+function renderAssemblySummary() {
+  const aj = S.state?.assembly;
+  const badge = document.getElementById("project-status-badge");
+  const dimsEl = document.getElementById("project-dims-text");
+  if (!aj) {
+    badge.className = "badge badge-neutral";
+    badge.textContent = "Baugruppe – nicht gebaut";
+    dimsEl.textContent = "build_assembly ausführen";
+  } else {
+    const bad = aj.posen.filter((p) => !p.ok).length;
+    badge.className = bad ? "badge badge-err" : "badge badge-ok";
+    badge.textContent = bad ? `${bad} von ${aj.posen.length} Posen kollidieren` : `Baugruppe OK (${aj.posen.length} Posen)`;
+    const bb = aj.bbox;
+    dimsEl.textContent = bb ? `${[0, 1, 2].map((i) => (bb[1][i] - bb[0][i]).toFixed(1)).join(" × ")} mm` : "–";
+  }
+  document.getElementById("saved-feedback-pill").classList.toggle("hidden", !S.state?.feedback);
+  renderAssemblyPanel();
+}
+
+function renderAssemblyPanel() {
+  const aj = S.state?.assembly;
+  const sel = document.getElementById("pose-select");
+  const legend = document.getElementById("assembly-legend");
+  const checks = document.getElementById("assembly-checks");
+  const status = document.getElementById("pose-status");
+  sel.innerHTML = "";
+  if (!aj) {
+    legend.innerHTML = `<div class="empty-hint">Noch nicht gebaut: <code>build_assembly</code> bzw. <code>uv run slicetheprompt baugruppe ${escapeHtml(S.currentProject || "")}</code></div>`;
+    checks.innerHTML = "";
+    status.className = "badge badge-neutral";
+    status.textContent = "–";
+    return;
+  }
+  aj.posen.forEach((p, i) => {
+    const opt = document.createElement("option");
+    opt.value = String(i);
+    opt.textContent = `${p.ok ? "✓" : "✗"} ${p.name}`;
+    sel.appendChild(opt);
+  });
+  sel.value = String(S.asm.pose);
+  const pose = asmPose();
+  status.className = pose.ok ? "badge badge-ok" : "badge badge-err";
+  status.textContent = pose.ok ? "frei" : "Kollision";
+
+  const rows = [];
+  for (const t of aj.teile) {
+    const key = `teil:${t.name}`;
+    const on = !S.asm.hidden.has(key);
+    const st = t.status || {};
+    const warn = st.veraltet ? " ⚠ veraltet" : st.passed === false ? " ✗" : "";
+    const tip = `${t.projekt}${st.veraltet ? " – model.py neuer als STEP, Teil neu bauen" : ""}`;
+    rows.push(`<label class="asm-item${on ? "" : " off"}" title="${escapeAttr(tip)}">
+      <input type="checkbox" data-asm-key="${escapeAttr(key)}" ${on ? "checked" : ""} />
+      <span class="legend-swatch" style="background:${t.farbe}"></span>
+      <span>${escapeHtml(t.name)}${warn}</span>
+      <span class="asm-meta">${t.anzahl > 1 ? `×${t.anzahl}` : ""}</span>
+    </label>`);
+  }
+  for (const g of pose.geister) {
+    const key = `geist:${g.name}`;
+    const on = !S.asm.hidden.has(key);
+    rows.push(`<label class="asm-item${on ? "" : " off"}" title="Bezugskörper – wird nicht gedruckt">
+      <input type="checkbox" data-asm-key="${escapeAttr(key)}" ${on ? "checked" : ""} />
+      <span class="legend-swatch ghost" style="background:${g.farbe}"></span>
+      <span>${escapeHtml(g.name)} <span class="asm-meta">(Geist)</span></span>
+      <span></span>
+    </label>`);
+  }
+  const onOv = !S.asm.hidden.has("ueberschneidung");
+  rows.push(`<label class="asm-item${onOv ? "" : " off"}" title="Überschneidungen (rot = Fehler, orange = erlaubter Klemmkontakt)">
+      <input type="checkbox" data-asm-key="ueberschneidung" ${onOv ? "checked" : ""} />
+      <span class="legend-swatch overlap"></span>
+      <span>Überschneidungen</span>
+      <span class="asm-meta">${pose.ueberschneidungen.length}</span>
+    </label>`);
+  legend.innerHTML = rows.join("");
+  legend.querySelectorAll("input[data-asm-key]").forEach((inp) => {
+    inp.addEventListener("change", () => {
+      const k = inp.dataset.asmKey;
+      if (inp.checked) S.asm.hidden.delete(k);
+      else S.asm.hidden.add(k);
+      inp.closest(".asm-item").classList.toggle("off", !inp.checked);
+      applyAssemblyVisibility();
+      renderSceneLegend();
+    });
+  });
+
+  // Prüfergebnis dieser Pose
+  checks.innerHTML = "";
+  for (const c of pose.checks) {
+    const u = pose.ueberschneidungen.find((x) => `${x.a} + ${x.b}` === c.paar);
+    const el = document.createElement("div");
+    el.className = `diag-item ${c.ok ? (c.art === "klemmkontakt" ? "warn" : "ok") : "error"}`;
+    const title = c.ok ? (c.art === "klemmkontakt" ? "Klemmkontakt (erlaubt)" : "Überschneidung ≤ Grenze") : "Kollision";
+    el.innerHTML = `<div><div class="diag-title">${title}</div><div class="diag-sub">${escapeHtml(c.text)}${u ? " · Klick zeigt die Stelle" : ""}</div></div>`;
+    if (u) el.addEventListener("click", () => focusAssemblyBox(u.bbox));
+    checks.appendChild(el);
+  }
+  if (!pose.checks.length) {
+    const el = document.createElement("div");
+    el.className = "diag-item ok";
+    el.innerHTML = `<div><div class="diag-title">Keine Überschneidung</div><div class="diag-sub">Alle Teile und Geister frei</div></div>`;
+    checks.appendChild(el);
+  }
+  const gaps = pose.abstaende.filter((a) => a.genau && a.mm > 0).slice(0, 6);
+  if (gaps.length) {
+    const tbl = document.createElement("table");
+    tbl.className = "asm-gaps";
+    tbl.innerHTML = `<tbody><tr><td colspan="2">Engste Spalte:</td></tr>${gaps
+      .map((a) => `<tr><td>${escapeHtml(a.a)} ↔ ${escapeHtml(a.b)}</td><td class="mono">${a.mm.toFixed(2)} mm</td></tr>`)
+      .join("")}</tbody>`;
+    checks.appendChild(tbl);
+  }
+}
+
+function focusAssemblyBox(bb) {
+  if (S.asm.explode) {
+    S.asm.explode = 0;
+    document.getElementById("explode-slider").value = "0";
+    document.getElementById("explode-value").textContent = "0 %";
+    applyExplosion();
+  }
+  focusBox3D(null, [...bb[0], ...bb[1]]);
+}
+
+function renderAssemblyDiagnostics(wrap) {
+  wrap.innerHTML = "";
+  const aj = S.state?.assembly;
+  const badge = document.getElementById("badge-issues-count");
+  if (!aj) {
+    wrap.innerHTML = `<div class="empty-hint">Baugruppe noch nicht gebaut.</div>`;
+    badge.classList.add("hidden");
+    return;
+  }
+  let bad = 0;
+  aj.posen.forEach((p, i) => {
+    const fails = p.checks.filter((c) => !c.ok);
+    bad += fails.length;
+    const kontakt = p.checks.filter((c) => c.ok && c.art === "klemmkontakt");
+    const sub = fails.length
+      ? fails.map((c) => escapeHtml(c.text)).join("<br>")
+      : kontakt.length
+        ? kontakt.map((c) => escapeHtml(c.text)).join("<br>")
+        : "keine Überschneidung";
+    const el = document.createElement("div");
+    el.className = `diag-item ${fails.length ? "error" : "ok"}`;
+    el.style.cursor = "pointer";
+    el.innerHTML = `<div><div class="diag-title">${i === S.asm.pose ? "▶ " : ""}${escapeHtml(p.name)}</div><div class="diag-sub">${sub}</div></div>`;
+    el.addEventListener("click", () => setAssemblyPose(i));
+    wrap.appendChild(el);
+  });
+  for (const h of aj.hinweise || []) {
+    const el = document.createElement("div");
+    el.className = "diag-item warn";
+    el.innerHTML = `<div><div class="diag-title">Hinweis</div><div class="diag-sub">${escapeHtml(h)}</div></div>`;
+    wrap.appendChild(el);
+  }
+  badge.textContent = String(bad);
+  badge.classList.toggle("hidden", !bad);
+}
+
+function renderAssemblyChecksAndSpec() {
+  const aj = S.state?.assembly;
+  const checksWrap = document.getElementById("checks-table-wrap");
+  const specWrap = document.getElementById("spec-details");
+  if (!aj) {
+    checksWrap.innerHTML = `<div class="empty-hint">Keine Prüfdaten vorhanden.</div>`;
+    specWrap.innerHTML = "";
+  } else {
+    const rows = [];
+    for (const p of aj.posen) {
+      if (!p.checks.length) {
+        rows.push(`<tr><td><span style="color:var(--green)">✓</span> ${escapeHtml(p.name)}</td><td class="mono">frei</td><td class="mono">–</td></tr>`);
+      }
+      for (const c of p.checks) {
+        const ist = c.tiefe_mm != null ? `${c.volumen_mm3.toFixed(2)} mm³ · ${c.tiefe_mm.toFixed(2)} mm` : `${c.volumen_mm3.toFixed(2)} mm³`;
+        const u = p.ueberschneidungen.find((x) => `${x.a} + ${x.b}` === c.paar);
+        const lim = c.art === "klemmkontakt" ? `Tiefe ≤ ${u?.erlaubt_tiefe_mm ?? "?"} mm` : `≤ ${aj.grenze_mm3} mm³`;
+        const mark = c.ok ? `<span style="color:var(--green)">✓</span>` : `<span style="color:var(--red)">✗</span>`;
+        rows.push(`<tr><td>${mark} ${escapeHtml(p.name)}: ${escapeHtml(c.paar)}</td><td class="mono">${ist}</td><td class="mono">${lim}</td></tr>`);
+      }
+    }
+    checksWrap.innerHTML = `<table class="checks-table"><thead><tr><th>Pose: Paar</th><th>Ist</th><th>Grenze</th></tr></thead><tbody>${rows.join("")}</tbody></table>`;
+    const teile = aj.teile
+      .map(
+        (t) =>
+          `<li><span class="legend-swatch" style="display:inline-block;width:10px;height:10px;background:${t.farbe}"></span> ${escapeHtml(t.name)}${t.anzahl > 1 ? ` ×${t.anzahl}` : ""} – <code>${escapeHtml(t.projekt)}</code>${t.status?.passed === false ? " ✗" : ""}${t.status?.veraltet ? " ⚠ veraltet" : ""}</li>`
+      )
+      .join("");
+    specWrap.innerHTML = `
+      <div><strong>Baugruppe:</strong> ${escapeHtml(aj.beschreibung || aj.projekt)}</div>
+      <div><strong>Teile:</strong><ul class="spec-list">${teile}</ul></div>
+      <div><strong>Posen:</strong> ${aj.posen.length} · gebaut ${escapeHtml(aj.erstellt || "")} (${aj.zeit_s} s)</div>`;
+  }
+  const previewWrap = document.getElementById("render-preview-wrap");
+  previewWrap.innerHTML = S.state?.render_png_url ? `<img src="${S.state.render_png_url}" alt="Baugruppe" />` : "";
+  document.getElementById("model-code-view").textContent = S.state?.model_code || "";
+}
+
 function handleResize() {
   const w = container.clientWidth;
   const h = container.clientHeight;

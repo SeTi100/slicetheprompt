@@ -415,6 +415,10 @@ def render(project: str, which: str = "print", colors: dict | None = None) -> di
 
 def run_all(project: str, orientation: str | None = None, reason: str = "build_and_check") -> dict:
     """Bauen, (optional) Lage wählen, prüfen, rendern – ein Durchlauf."""
+    from .assembly import build_assembly, is_assembly
+    d = project_dir(project)
+    if is_assembly(d) and not (d / "model.py").exists():
+        return {"stage": "baugruppe", **build_assembly(project)}
     b = build(project)
     if not b.get("ok"):
         return {"stage": "build", **b}
@@ -540,9 +544,12 @@ def new_stencil(project: str, z: float | list[float] = 0.0, hoehe: float = 2.0) 
 
 
 def list_projects() -> list[dict]:
+    from .assembly import is_assembly
     out = []
     for d in sorted(PROJECTS_DIR.glob("*")):
-        if d.is_dir() and (d / "model.py").exists():
+        if d.is_dir() and is_assembly(d) and not (d / "model.py").exists():
+            out.append({"project": d.name, "baugruppe": True, "built": (d / "out" / "assembly.json").exists()})
+        elif d.is_dir() and (d / "model.py").exists():
             gc = sorted((d / "out").glob("*.gcode"))
             out.append({"project": d.name, "built": (d / "out" / "model.stl").exists(),
                         "bodies": body_names(d) or None, "gcode": [g.name for g in gc]})
