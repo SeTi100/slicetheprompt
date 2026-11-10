@@ -32,6 +32,30 @@ Koordinaten, Feature-Namen und Screenshot über das MCP-Werkzeug `get_ui_feedbac
 Studio aktualisiert sich live, sobald der Agent neu baut, und **druckt nie selbst**: Druckstart nur im
 Chat nach deinem „drucken“.
 
+### 3MF-Dateien ansehen
+
+Eine oder mehrere `.3mf`-Dateien **an beliebiger Stelle ins Studio-Fenster ziehen**:
+Studio legt dafür ein neues lokales Importprojekt an und wählt es direkt aus. Ein Drop mit
+mehreren Dateien ergibt ein gemeinsames Projekt; vorhandene Projekte werden nicht überschrieben.
+Pro Drop sind bis zu 32 Dateien mit insgesamt 256 MB möglich.
+
+Alternativ einen Ordner unter `projects/` anlegen und die 3MF-Dateien direkt hineinlegen.
+Der Ordner erscheint in der bestehenden Projektauswahl, auch ohne `model.py` oder `spec.yaml`.
+Bei mehreren Dateien beziehungsweise Druckplatten erscheint darunter eine zusätzliche Auswahl.
+Körper lassen sich einzeln ausblenden; Messen und Schnittansicht funktionieren wie gewohnt.
+Hinzugefügte, ersetzte und gelöschte Dateien werden live erkannt.
+
+Der Import dient zunächst als **Vorschau**, mit den gespeicherten Platzierungen und in Millimetern.
+Unterstützt werden Dreiecksnetze, verschachtelte Komponenten, Instanzen und interne
+Produktionsverweise sowie einfache Körper-/Filamentfarben und lesbare Slicer-Plattenzuordnungen.
+Flächenbemalung und Texturen werden nicht übernommen; nicht unterstützte erforderliche
+Erweiterungen werden als Importfehler angezeigt. CAD-Projekte mit `model.py` oder `assembly.py`
+haben Vorrang vor losen 3MF-Dateien im selben Ordner.
+
+Originaldateien bleiben unverändert. Unter `out/imports/` liegen nur zwischengespeicherte
+Vorschaunetze. Importmodelle erhalten keine CAD-Parameter, keine automatische Druckfreigabe und
+keine übernommenen Druckerprofile; Druckprüfung und Slicen sind für diesen Projekttyp noch nicht verfügbar.
+
 ### 3D-Feedback an den Agenten (Beispiel: Lineal-Skala anpassen)
 
 Statt im Chat umständlich zu erklären, wo etwas geändert werden soll, klickst du direkt ins 3D-Modell.

@@ -31,6 +31,7 @@ const S = {
   measurement: null,       // { a_model, b_model, a_print, b_print, dist, delta_model }
   partBounds: null,        // THREE.Box3 of active meshes in current viewMode
   flashTimer: null,
+  imported: { file: null, plate: null, key: null, hidden: new Set(), prevViewMode: null },
   // Baugruppe (Projekt mit assembly.py): Pose, Explosion, ausgeblendete Teile, Netz-Cache
   asm: {
     pose: 0,
@@ -471,6 +472,7 @@ async function rebuildSceneGeometry(fitCameraAfter = false) {
 
   // 1. Load main body meshes
   for (const m of meshesInfo) {
+    if (isImport() && S.imported.hidden.has(m.id)) continue;
     const url = S.viewMode === "print" ? m.print_url : m.model_url;
     if (!url) continue;
     try {
@@ -921,6 +923,7 @@ function detectFeaturesInsideModelBox(bbox6) {
 }
 
 function setTool(toolName) {
+  if (isImport() && !["orbit", "measure"].includes(toolName)) return;
   S.tool = toolName;
   S.pendingPoint = null;
   clearGroup(previewGroup);
@@ -1358,6 +1361,26 @@ async function loadProjectsList(selectProjectName = null) {
     opt.value = "";
     opt.textContent = "Keine Projekte gefunden";
     sel.appendChild(opt);
+    S.currentProject = null;
+    S.state = null;
+    S.annotations = [];
+    S.measurement = null;
+    S.partBounds = null;
+    S.ghostVersion = null;
+    S.imported.file = null;
+    S.imported.plate = null;
+    enterOrLeaveImportMode();
+    enterOrLeaveAssemblyMode(false);
+    renderProjectSummary();
+    renderVersionList();
+    renderHistoricalBanner();
+    renderDiagnosticsList();
+    renderAnnotationsList();
+    renderMeasureBox();
+    await rebuildSceneGeometry();
+    rebuildAnnotationVisuals();
+    renderSceneLegend();
+    await rebuildGhostVersionMesh();
     return;
   }
 
@@ -1366,17 +1389,15 @@ async function loadProjectsList(selectProjectName = null) {
     opt.value = p.project;
     const statusIcon = p.passed === true ? "✓" : p.passed === false ? "✗" : "•";
     const fbIcon = p.has_feedback ? " 📌" : "";
-    const kind = p.kind === "assembly" ? "🧩 " : "";
+    const kind = p.kind === "assembly" ? "🧩 " : p.kind === "import" ? "3MF · " : "";
     opt.textContent = `${statusIcon} ${kind}${p.project}${fbIcon}`;
     if (p.kind === "assembly") opt.title = `Baugruppe: ${(p.bodies || []).join(", ")} · ${p.pose_count || 0} Posen`;
     sel.appendChild(opt);
   }
 
   const urlProj = new URLSearchParams(window.location.search).get("project");
-  const target =
-    selectProjectName ||
-    S.currentProject ||
-    (urlProj && S.projects.some((p) => p.project === urlProj) ? urlProj : S.projects[0].project);
+  const target = [selectProjectName, S.currentProject, urlProj, S.projects[0].project]
+    .find((name) => S.projects.some((p) => p.project === name));
 
   sel.value = target;
   if (target !== S.currentProject) {
@@ -1396,12 +1417,17 @@ async function selectProject(projName, version = null, fitCam = true) {
     S.measurement = null;
   }
 
-  const q = version ? `?version=${encodeURIComponent(version)}` : "";
+  const query = new URLSearchParams();
+  if (version) query.set("version", version);
+  if (!projectChanged && S.imported.file) query.set("file", S.imported.file);
+  if (!projectChanged && S.imported.plate) query.set("plate", S.imported.plate);
+  const q = query.size ? `?${query}` : "";
   const req = ++selectSeq;
   const state = await apiFetch(`/api/projects/${encodeURIComponent(projName)}/state${q}`);
   if (req !== selectSeq) return; // inzwischen anderes Projekt/andere Version gewählt
   S.state = state;
   enterOrLeaveAssemblyMode(projectChanged);
+  enterOrLeaveImportMode();
 
   // Restore saved open feedback annotations when switching to project live view
   if (projectChanged) {
@@ -1436,6 +1462,16 @@ async function selectProject(projName, version = null, fitCam = true) {
 }
 
 function renderProjectSummary() {
+  if (isImport()) {
+    const err = S.state.import.error;
+    const badge = document.getElementById("project-status-badge");
+    badge.className = err ? "badge badge-err" : "badge badge-neutral";
+    badge.textContent = err ? "Importfehler" : "3MF-Vorschau";
+    const sz = S.state.build.size_mm;
+    document.getElementById("project-dims-text").textContent = sz ? `${sz.map((n) => Number(n).toFixed(1)).join(" × ")} mm` : "–";
+    document.getElementById("saved-feedback-pill").classList.add("hidden");
+    return;
+  }
   if (isAssembly()) {
     renderAssemblySummary();
     return;
@@ -1542,6 +1578,17 @@ function renderVersionList() {
 function renderDiagnosticsList() {
   const wrap = document.getElementById("diagnostics-list");
   wrap.innerHTML = "";
+  if (!S.state) {
+    wrap.textContent = "3MF-Dateien ins Fenster ziehen oder ein Projekt auswählen.";
+    return;
+  }
+  if (isImport()) {
+    const data = S.state.import;
+    wrap.innerHTML = `<div class="empty-hint">3MF-Vorschau · Druckbarkeit und Funktionsmasse sind ungeprüft.</div>` +
+      (data.error ? `<div class="diag-item error">${escapeHtml(data.error)}</div>` : "") +
+      data.warnings.map((w) => `<div class="diag-item warn">${escapeHtml(w)}</div>`).join("");
+    return;
+  }
   if (isAssembly()) {
     renderAssemblyDiagnostics(wrap);
     return;
@@ -1789,6 +1836,10 @@ function renderParamsForm() {
 
   const form = document.getElementById("params-form");
   form.innerHTML = "";
+  if (isImport()) {
+    form.innerHTML = `<div class="empty-hint">Importierte 3MF-Modelle haben keine bearbeitbaren CAD-Parameter.</div>`;
+    return;
+  }
   const params = S.state?.params || [];
   if (!params.length) {
     form.innerHTML = `<div class="empty-hint">Keine numerischen Top-Level-Parameter vor <code>part</code>/<code>bodies</code> gefunden.</div>`;
@@ -1814,6 +1865,13 @@ function renderParamsForm() {
 }
 
 function renderChecksAndSpec() {
+  if (isImport()) {
+    document.getElementById("checks-table-wrap").textContent = "Vorschau: keine Prüfung der Druckbarkeit oder Funktionsmasse.";
+    document.getElementById("spec-details").textContent = `Quelle: ${S.state.import.source || "–"}. Material und Druckeinstellungen wurden nicht übernommen.`;
+    document.getElementById("render-preview-wrap").innerHTML = "";
+    document.getElementById("model-code-view").textContent = "Kein CAD-Quellcode vorhanden.";
+    return;
+  }
   if (isAssembly()) {
     renderAssemblyChecksAndSpec();
     return;
@@ -1880,9 +1938,10 @@ function renderSceneLegend() {
     return;
   }
   for (const m of S.state?.meshes || []) {
+    if (isImport() && S.imported.hidden.has(m.id)) continue;
     items.push(`<span class="legend-item"><span class="legend-swatch" style="background:${m.color}"></span>${escapeHtml(m.name === "_teil" ? "Bauteil" : m.name)}</span>`);
   }
-  if (S.overlays.errors) {
+  if (S.overlays.errors && !isImport() && S.state) {
     items.push(`<span class="legend-item"><span class="legend-swatch" style="background:#ef4444"></span>Fehler / Dünnwand</span>`);
     items.push(`<span class="legend-item"><span class="legend-swatch" style="background:#f59e0b"></span>Überhang / Brücke</span>`);
   }
@@ -1899,6 +1958,7 @@ function setBusy(busy, msg = "CAD-Modell wird neu gebaut & geprüft …") {
 }
 
 async function saveFeedbackForAgent() {
+  if (isImport()) return;
   if (!S.currentProject) return;
   const generalNote = document.getElementById("general-note").value.trim();
   if (!S.annotations.length && !generalNote) {
@@ -1937,6 +1997,7 @@ async function saveFeedbackForAgent() {
 }
 
 async function applyParamsAndRebuild() {
+  if (isImport()) return;
   if (!S.currentProject) return;
   const inputs = document.querySelectorAll("#params-form .param-input");
   const updates = {};
@@ -1972,6 +2033,14 @@ async function applyParamsAndRebuild() {
 
 async function rebuildCurrentProject() {
   if (!S.currentProject) return;
+  if (isImport()) {
+    try {
+      await selectProject(S.currentProject, null, false);
+    } catch (err) {
+      showToast(`Fehler: ${err.message}`);
+    }
+    return;
+  }
   const orient = document.getElementById("orientation-select")?.value || "wie modelliert";
   setBusy(true, "Projekt wird neu gebaut & auf 3D-Fehler geprüft …");
   try {
@@ -2092,7 +2161,7 @@ function connectSSE() {
   es.addEventListener("project_updated", async (ev) => {
     try {
       const msg = JSON.parse(ev.data);
-      await loadProjectsList(S.currentProject);
+      await loadProjectsList();
       if (S.currentProject && msg.projects?.includes(S.currentProject) && !S.activeVersion) {
         await selectProject(S.currentProject, null, false);
         showToast(`↻ Live-Update: ${S.currentProject} neu geladen`);
@@ -2162,6 +2231,10 @@ function chf(v, cur = "CHF") {
 async function renderCosts() {
   const box = document.getElementById("cost-box");
   if (!box || !S.currentProject) return;
+  if (isImport()) {
+    box.textContent = "3MF-Vorschau – noch keine Druckkosten vorhanden.";
+    return;
+  }
   if (isAssembly()) {
     box.innerHTML = `<span class="status-muted">Baugruppen werden nicht gedruckt – Kosten je Teil-Projekt ansehen.</span>`;
     return;
@@ -2572,6 +2645,139 @@ function isAssembly() {
   return S.state?.kind === "assembly";
 }
 
+function isImport() {
+  return S.state?.kind === "import";
+}
+
+function enterOrLeaveImportMode() {
+  const imported = isImport();
+  document.getElementById("import-panel").classList.toggle("hidden", !imported);
+  document.getElementById("annotations-section").classList.toggle("hidden", imported);
+  document.querySelectorAll('#tab-params .pane-section').forEach((el) => el.classList.toggle("hidden", imported));
+  document.querySelectorAll('.tab-btn[data-tab="params"]').forEach((el) => el.classList.toggle("hidden", imported));
+  if (imported && document.getElementById("tab-params").classList.contains("active")) switchRightTab("diagnose");
+  for (const tool of ["pin", "box", "move"]) {
+    document.querySelector(`.tool-btn[data-tool="${tool}"]`).disabled = imported;
+  }
+  const reload = document.getElementById("btn-rebuild-now");
+  reload.textContent = imported ? "↻ Neu laden" : "↻ Neu prüfen";
+  reload.title = imported ? "3MF-Datei erneut laden" : "Projekt neu bauen & prüfen";
+  if (!imported) {
+    S.imported.file = null;
+    S.imported.plate = null;
+    S.imported.key = null;
+    if (S.imported.prevViewMode !== null) {
+      // On switching to an assembly, restore the pre-import choice for later.
+      if (isAssembly()) S.asm.prevViewMode = S.imported.prevViewMode;
+      else S.viewMode = S.imported.prevViewMode;
+      S.imported.prevViewMode = null;
+    }
+    document.getElementById("btn-space-print").classList.toggle("active", S.viewMode === "print");
+    document.getElementById("btn-space-model").classList.toggle("active", S.viewMode === "model");
+    return;
+  }
+  if (S.imported.prevViewMode === null) S.imported.prevViewMode = S.viewMode;
+  S.viewMode = "model";
+  S.ghostVersion = null;
+  S.annotations = [];
+  document.getElementById("general-note").value = "";
+  if (!["orbit", "measure"].includes(S.tool)) setTool("orbit");
+  const data = S.state.import;
+  const key = JSON.stringify([S.currentProject, data.source, data.plate, data.sha256]);
+  if (key !== S.imported.key) {
+    S.imported.hidden = new Set();
+    S.measurement = null;
+  }
+  S.imported.key = key;
+  S.imported.file = data.source;
+  S.imported.plate = data.plate;
+  const fillSelect = (id, options, value) => {
+    const select = document.getElementById(id);
+    select.replaceChildren(...options.map(([key, label]) => new Option(label, key)));
+    select.value = value || "";
+  };
+  fillSelect("import-file-select", data.sources.map((name) => [name, name]), data.source);
+  fillSelect("import-plate-select", data.plates.map((p) => [p.id, p.name]), data.plate);
+  document.getElementById("import-file-row").classList.toggle("hidden", data.sources.length <= 1);
+  document.getElementById("import-plate-row").classList.toggle("hidden", data.plates.length <= 1);
+  document.getElementById("import-source").textContent = data.error || `Quelle: ${data.source} · Vorschau`;
+  const bodies = document.getElementById("import-bodies");
+  bodies.innerHTML = S.state.meshes.map((m) => `<label class="asm-item" title="${escapeAttr(m.size_mm.join(" × "))} mm">
+    <input type="checkbox" data-import-body="${m.id}" ${S.imported.hidden.has(m.id) ? "" : "checked"}>
+    <span class="legend-swatch" style="background:${m.color}"></span><span>${escapeHtml(m.name)}</span></label>`).join("");
+  bodies.querySelectorAll("input").forEach((input) => input.addEventListener("change", async () => {
+    if (input.checked) S.imported.hidden.delete(input.dataset.importBody);
+    else S.imported.hidden.add(input.dataset.importBody);
+    await rebuildSceneGeometry(false);
+  }));
+}
+
+// File drops are intercepted at document level, including over sidebars and modals.
+function bindImportDrop() {
+  let depth = 0;
+  let uploading = false;
+  const overlay = document.getElementById("drop-overlay");
+  const hasFiles = (ev) => Array.from(ev.dataTransfer?.types || []).includes("Files");
+  const reset = () => { depth = 0; overlay.classList.add("hidden"); };
+  document.addEventListener("dragenter", (ev) => {
+    if (!hasFiles(ev)) return;
+    ev.preventDefault();
+    depth++;
+    overlay.classList.remove("hidden");
+  }, true);
+  document.addEventListener("dragover", (ev) => {
+    if (!hasFiles(ev)) return;
+    ev.preventDefault();
+    ev.dataTransfer.dropEffect = "copy";
+    overlay.classList.remove("hidden");
+  }, true);
+  document.addEventListener("dragleave", (ev) => {
+    if (!hasFiles(ev)) return;
+    if (--depth <= 0) reset();
+  }, true);
+  document.addEventListener("drop", async (ev) => {
+    if (!hasFiles(ev)) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    reset();
+    if (uploading) { showToast("Ein Import läuft bereits."); return; }
+    const files = Array.from(ev.dataTransfer.files);
+    const directories = Array.from(ev.dataTransfer.items || []).some((item) => item.webkitGetAsEntry?.()?.isDirectory);
+    if (directories || !files.length || files.some((f) => !/\.3mf$/i.test(f.name))) {
+      showToast("Bitte eine oder mehrere 3MF-Dateien ablegen.");
+      return;
+    }
+    if (files.length > 32 || files.reduce((n, f) => n + f.size, 0) > 256 * 1024 * 1024) {
+      showToast("Maximal 32 Dateien und insgesamt 256 MB pro Import.");
+      return;
+    }
+    uploading = true;
+    setBusy(true, "3MF-Dateien werden importiert …");
+    try {
+      const form = new FormData();
+      files.forEach((file) => form.append("files", file, file.name));
+      const result = await apiFetch("/api/imports", { method: "POST", body: form });
+      await loadProjectsList(result.project);
+      showToast(`${files.length} 3MF-Datei${files.length === 1 ? "" : "en"} importiert`);
+    } catch (err) {
+      showToast(`Import fehlgeschlagen: ${err.message}`);
+    } finally {
+      uploading = false;
+      setBusy(false);
+    }
+  }, true);
+  window.addEventListener("blur", reset);
+  document.addEventListener("keydown", (ev) => { if (ev.key === "Escape") reset(); });
+  for (const [id, field] of [["import-file-select", "file"], ["import-plate-select", "plate"]]) {
+    document.getElementById(id).addEventListener("change", async (ev) => {
+      S.imported[field] = ev.target.value;
+      if (field === "file") S.imported.plate = null;
+      try { await selectProject(S.currentProject, null, true); }
+      catch (err) { showToast(`Import fehlgeschlagen: ${err.message}`); }
+    });
+  }
+}
+
 function asmPose() {
   const posen = S.state?.assembly?.posen || [];
   if (!posen.length) return null;
@@ -2581,8 +2787,8 @@ function asmPose() {
 function enterOrLeaveAssemblyMode(projectChanged) {
   const asm = isAssembly();
   document.getElementById("assembly-panel").classList.toggle("hidden", !asm);
-  document.getElementById("versions-block").classList.toggle("hidden", asm);
-  document.getElementById("space-group").classList.toggle("hidden", asm);
+  document.getElementById("versions-block").classList.toggle("hidden", asm || isImport());
+  document.getElementById("space-group").classList.toggle("hidden", asm || isImport());
   document.getElementById("tool-bewegen").classList.toggle("hidden", !(asm && kinData()));
   if (!(asm && kinData()) && S.tool === "bewegen") setTool("orbit");
   if (asm) {
@@ -3596,6 +3802,7 @@ function animate() {
 (async function init() {
   handleResize();
   bindEvents();
+  bindImportDrop();
   animate();
   await loadProjectsList();
   connectSSE();

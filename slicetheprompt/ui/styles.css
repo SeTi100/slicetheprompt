@@ -1159,6 +1159,25 @@ button {
   display: none !important;
 }
 
+.drop-overlay {
+  position: fixed;
+  inset: 10px;
+  z-index: 10000;
+  display: grid;
+  place-items: center;
+  border: 3px dashed var(--accent, #38bdf8);
+  border-radius: 14px;
+  background: rgba(9, 20, 35, .9);
+  color: #e5f4ff;
+  pointer-events: none;
+  font-size: 24px;
+  text-align: center;
+}
+.drop-overlay small { display: block; margin-top: 12px; font-size: 14px; }
+#import-source { overflow-wrap: anywhere; }
+#import-panel .asm-item { grid-template-columns: 16px 14px minmax(0, 1fr); }
+#import-panel .asm-item span:last-child { overflow-wrap: anywhere; }
+
 /* ==================== Baugruppe ==================== */
 .asm-row {
   display: grid;

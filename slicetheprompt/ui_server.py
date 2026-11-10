@@ -20,7 +20,7 @@ import webbrowser
 
 import yaml
 
-from . import assembly as asm_mod, history, kosten as kosten_mod, meshcheck as mc, params as params_mod, pipeline
+from . import assembly as asm_mod, history, import3mf, kosten as kosten_mod, meshcheck as mc, params as params_mod, pipeline
 from .config import PROJECTS_DIR, load_config, project_dir
 from .moonraker import Moonraker
 
@@ -89,6 +89,15 @@ def list_projects_summary(projects_root: Path = PROJECTS_DIR) -> list[dict[str, 
         return items
 
     for d in sorted(projects_root.iterdir()):
+        if import3mf.project_kind(d) == "import":
+            sources = import3mf.source_files(d)
+            items.append({"project": d.name, "kind": "import", "beschreibung": "3MF-Import",
+                          "material": "", "built": False, "passed": None, "errors_count": 0,
+                          "warnings_count": 0, "size_mm": None, "bodies": None,
+                          "version_count": 0, "latest_version": None, "has_feedback": False,
+                          "sources": [p.name for p in sources],
+                          "mtime": max(p.stat().st_mtime for p in sources)})
+            continue
         if d.is_dir() and asm_mod.is_assembly(d) and not (d / "model.py").exists():
             items.append(_assembly_summary(d))
             continue
@@ -228,8 +237,46 @@ def _run_assembly_worker(d: Path, func: str = "build_assembly", *extra: Any) -> 
     return {"stage": "baugruppe" if res.get("ok") is not None and "error" not in res else "fehler", **res}
 
 
-def build_project_state(d: Path, version: str | None = None) -> dict[str, Any]:
+def build_import_state(d: Path, filename: str | None = None, plate: str | None = None) -> dict[str, Any]:
+    """An import is a read-only preview, with no fabricated CAD or print checks."""
+    cfg = load_config()
+    sources = [p.name for p in import3mf.source_files(d)]
+    filename = filename if filename in sources else (sources[0] if sources else None)
+    data: dict = {}
+    error = None
+    try:
+        data = import3mf.preview(d, filename)
+    except (ValueError, OSError) as exc:
+        error = f"3MF konnte nicht geladen werden: {exc}"
+    plates = data.get("plates", [])
+    plate = plate if plate in {p["id"] for p in plates} else (plates[0]["id"] if plates else None)
+    bodies = [b for b in data.get("bodies", []) if b["plate"] == plate]
+    base = f"/api/projects/{urllib.parse.quote(d.name)}/files/"
+    meshes = [{"id": b["id"], "name": b["name"], "color": b["color"],
+               "size_mm": b["size_mm"],
+               "model_url": base + urllib.parse.quote(b["stl"], safe="/"),
+               "print_url": base + urllib.parse.quote(b["stl"], safe="/")} for b in bodies]
+    size = None
+    if bodies:
+        size = [round(max(b["bbox"][1][i] for b in bodies) - min(b["bbox"][0][i] for b in bodies), 4)
+                for i in range(3)]
+    bed = cfg.get("printer", {}).get("bed", {})
+    return {"kind": "import", "project": d.name, "version": None, "latest_version": None,
+            "is_historical": False, "spec": {}, "model_code": "", "params": [],
+            "build": {"size_mm": size}, "print_info": {}, "report": {}, "diagnostics": {},
+            "feedback": None, "versions": [], "colors": {}, "meshes": meshes, "ghost_meshes": [],
+            "full_print_stl_url": None, "full_model_stl_url": None, "render_png_url": None,
+            "orientations": [], "printer_bed": {"x": bed.get("x", 260), "y": bed.get("y", 260),
+                "z": bed.get("z", 300), "usable_xy": cfg.get("rules", {}).get("max_part_xy", [250, 250])},
+            "import": {"sources": sources, "source": filename, "sha256": data.get("sha256"),
+                       "plates": plates, "plate": plate, "warnings": data.get("warnings", []), "error": error}}
+
+
+def build_project_state(d: Path, version: str | None = None, filename: str | None = None,
+                        plate: str | None = None) -> dict[str, Any]:
     """Baut das vollständige Zustandspaket eines Projekts (aktuell oder historische Version)."""
+    if import3mf.project_kind(d) == "import":
+        return build_import_state(d, filename, plate)
     if asm_mod.is_assembly(d) and not (d / "model.py").exists():
         return build_assembly_state(d)
     cfg = load_config()
@@ -647,12 +694,16 @@ def prices_state() -> dict[str, Any]:
             "annahmen": {x: k[x] for x in ("strom_chf_kwh", "leistung_w", "verschleiss_chf_h", "fehldruck_pct")}}
 
 
-def _projects_watch_signature(projects_root: Path) -> dict[str, float]:
-    sig: dict[str, float] = {}
+def _projects_watch_signature(projects_root: Path) -> dict[str, Any]:
+    sig: dict[str, Any] = {}
     if not projects_root.exists():
         return sig
     for d in projects_root.iterdir():
         if not d.is_dir():
+            continue
+        if import3mf.project_kind(d) == "import":
+            sig[d.name] = tuple((p.name, p.stat().st_mtime_ns, p.stat().st_size)
+                                for p in import3mf.source_files(d))
             continue
         out = d / "out"
         mtimes = [
@@ -807,8 +858,8 @@ class StudioHandler(BaseHTTPRequestHandler):
 
                 curr_sig = _projects_watch_signature(self.projects_root)
                 changed = [
-                    proj for proj, mtime in curr_sig.items()
-                    if last_sig.get(proj) != mtime
+                    proj for proj in set(curr_sig) | set(last_sig)
+                    if last_sig.get(proj) != curr_sig.get(proj)
                 ]
                 if changed or set(curr_sig.keys()) != set(last_sig.keys()):
                     last_sig = curr_sig
@@ -860,7 +911,8 @@ class StudioHandler(BaseHTTPRequestHandler):
                 if len(segs) == 2 and segs[1] == "state":
                     d = _resolve_project_in_root(segs[0], self.projects_root)
                     ver = (qs.get("version") or [None])[0]
-                    self._send_json(build_project_state(d, version=ver))
+                    self._send_json(build_project_state(d, version=ver,
+                        filename=(qs.get("file") or [None])[0], plate=(qs.get("plate") or [None])[0]))
                     return
 
                 if len(segs) == 2 and segs[1] == "kosten":
@@ -909,6 +961,41 @@ class StudioHandler(BaseHTTPRequestHandler):
         raw_path = parsed.path
 
         try:
+            if raw_path == "/api/imports":
+                origin = self.headers.get("Origin")
+                if origin and urllib.parse.urlparse(origin).netloc != self.headers.get("Host"):
+                    self.close_connection = True
+                    self._send_json({"ok": False, "error": "Import nur aus dem Studio-Fenster erlaubt"}, status=403)
+                    return
+                length = int(self.headers.get("Content-Length", "0") or "0")
+                if length <= 0 or length > import3mf.MAX_TOTAL + 1024 * 1024:
+                    self.close_connection = True
+                    self._send_json({"ok": False, "error": "Upload ist leer oder grösser als 256 MB"}, status=413)
+                    return
+                from email.parser import BytesParser
+                from email.policy import default
+                content_type = self.headers.get("Content-Type", "")
+                if not content_type.startswith("multipart/form-data;") or "\r" in content_type or "\n" in content_type:
+                    self.close_connection = True
+                    self._send_json({"ok": False, "error": "Datei-Upload als multipart/form-data erwartet"}, status=415)
+                    return
+                message = BytesParser(policy=default).parsebytes(
+                    f"Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n".encode() + self.rfile.read(length))
+                try:
+                    if not message.is_multipart() or message.defects:
+                        raise ValueError("Ungültiger Datei-Upload")
+                    files = []
+                    for part in message.iter_parts():
+                        if part.get_content_disposition() != "form-data" or part.get_param("name", header="content-disposition") != "files":
+                            raise ValueError("Ungültiges Upload-Feld")
+                        files.append((part.get_filename(), part.get_payload(decode=True) or b""))
+                    target = import3mf.save_uploads(self.projects_root, files)
+                except ValueError as exc:
+                    self._send_json({"ok": False, "error": str(exc)}, status=422)
+                    return
+                self._send_json({"ok": True, "project": target.name}, status=201)
+                return
+
             if raw_path == "/api/preise":
                 body = self._read_body_json()
                 act = body.get("action") or "set"
@@ -945,6 +1032,10 @@ class StudioHandler(BaseHTTPRequestHandler):
             d = _resolve_project_in_root(proj_name, self.projects_root)
             body = self._read_body_json()
             lock: threading.Lock = getattr(self.server, "build_lock", threading.Lock())
+
+            if import3mf.project_kind(d) == "import":
+                self._send_json({"ok": False, "error": "3MF-Import ist eine Vorschau. CAD-Änderungen und CAD-Neubau sind hier nicht verfügbar."}, status=409)
+                return
 
             if action == "feedback":
                 rec = save_project_feedback(d, body)

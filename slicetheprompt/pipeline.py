@@ -611,9 +611,13 @@ def new_stencil(project: str, z: float | list[float] = 0.0, hoehe: float = 2.0) 
 
 def list_projects() -> list[dict]:
     from .assembly import is_assembly
+    from .import3mf import project_kind, source_files
     out = []
     for d in sorted(PROJECTS_DIR.glob("*")):
-        if d.is_dir() and is_assembly(d) and not (d / "model.py").exists():
+        if project_kind(d) == "import":
+            out.append({"project": d.name, "kind": "import", "built": False,
+                        "sources": [p.name for p in source_files(d)]})
+        elif d.is_dir() and is_assembly(d) and not (d / "model.py").exists():
             out.append({"project": d.name, "baugruppe": True, "built": (d / "out" / "assembly.json").exists()})
         elif d.is_dir() and (d / "model.py").exists():
             gc = sorted((d / "out").glob("*.gcode"))

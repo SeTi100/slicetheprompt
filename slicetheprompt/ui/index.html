@@ -40,6 +40,20 @@
         </div>
       </div>
 
+      <div id="import-panel" class="section-block hidden">
+        <div id="import-file-row">
+          <div class="section-header"><label for="import-file-select">3MF-Datei</label></div>
+          <select id="import-file-select" class="select-input"></select>
+        </div>
+        <div id="import-plate-row">
+          <div class="section-header"><label for="import-plate-select">Druckplatte</label></div>
+          <select id="import-plate-select" class="select-input"></select>
+        </div>
+        <p id="import-source" class="hint-text"></p>
+        <div class="section-header"><span>Körper</span></div>
+        <div id="import-bodies" class="asm-legend"></div>
+      </div>
+
       <!-- Baugruppe (nur bei Projekten mit assembly.py) -->
       <div id="assembly-panel" class="section-block flex-grow hidden">
         <div class="section-header">
@@ -207,6 +221,7 @@
 
       <!-- TAB 1: DIAGNOSE & MARKIERUNG -->
       <section id="tab-diagnose" class="tab-pane active">
+        <div id="measure-box" class="measure-readout hidden"></div>
         <div class="pane-section">
           <div class="section-header">
             <span>Automatische 3D-Prüfung</span>
@@ -215,12 +230,11 @@
           <div id="diagnostics-list" class="diag-list"></div>
         </div>
 
-        <div class="pane-section">
+        <div class="pane-section" id="annotations-section">
           <div class="section-header">
             <span>Deine 3D-Markierungen (<span id="ann-count">0</span>)</span>
             <button id="btn-clear-annotations" class="btn-xs" title="Alle ungespeicherten Pins/Boxen leeren">Leeren</button>
           </div>
-          <div id="measure-box" class="measure-readout hidden"></div>
           <div id="annotations-list" class="ann-list"></div>
 
           <div class="feedback-compose">
@@ -367,6 +381,9 @@
   </div>
 
   <div id="toast-container"></div>
+  <div id="drop-overlay" class="drop-overlay hidden" aria-hidden="true">
+    <div>3MF-Dateien hier ablegen<small>Als neues Projekt im Studio öffnen</small></div>
+  </div>
   <div id="busy-overlay" class="busy-overlay hidden">
     <div class="spinner"></div>
     <div id="busy-text">CAD-Modell wird neu gebaut &amp; geprüft …</div>
