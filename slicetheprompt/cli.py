@@ -201,6 +201,17 @@ def main(argv=None) -> int:
     s = sub.add_parser("filaments", help="Filamentprofile für den Hi auflisten")
     s.add_argument("--type")
     sub.add_parser("status")
+    sub.add_parser("details", help="Weitere Druckerinfos: Sensoren, Lüfter, Statistik, Kamera, System")
+    s = sub.add_parser("kosten", help="Druckkosten des zuletzt gesliceten G-Codes")
+    s.add_argument("project")
+    s = sub.add_parser("preis", help="Rollenpreise: list | set NAME [--preis] [--url] … | delete NAME | refresh")
+    s.add_argument("action", choices=["list", "set", "delete", "refresh"])
+    s.add_argument("name", nargs="?", default="")
+    s.add_argument("--preis", type=lambda v: float(v.replace(",", ".")))
+    s.add_argument("--gewicht", type=float, help="Rollengewicht in g (Standard 1000)")
+    s.add_argument("--url", help="Digitec-/Galaxus-Produktlink")
+    for f in ("material", "code", "profil", "farbe", "slot"):
+        s.add_argument(f"--{f}")
     s = sub.add_parser("print", help="G-Code mit Freigabe-Token hochladen und starten")
     s.add_argument("token")
     for name in ("cancel", "pause", "resume"):
@@ -305,6 +316,22 @@ def main(argv=None) -> int:
                 print(f"{f['type']:6s} {f['filament_id']:7s} {f['name']}")
         elif a.cmd == "status":
             _out(Moonraker().status())
+        elif a.cmd == "details":
+            _out(Moonraker().details())
+        elif a.cmd == "kosten":
+            from .kosten import for_project
+            _out(for_project(a.project))
+        elif a.cmd == "preis":
+            from . import kosten as K
+            if a.action == "list":
+                _out({"rollen": K.load_prices(), "standard": K.settings()["rollen"]})
+            elif a.action == "set":
+                _out(K.set_price(a.name, a.preis, a.gewicht, a.url, material=a.material, code=a.code,
+                                 profil=a.profil, farbe=a.farbe, slot=a.slot))
+            elif a.action == "delete":
+                _out(K.delete_price(a.name))
+            else:
+                _out(K.refresh_prices())
         elif a.cmd == "print":
             _out(jobs.print_gcode(a.token))
         elif a.cmd in ("cancel", "pause", "resume"):

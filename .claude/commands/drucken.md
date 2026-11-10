@@ -12,7 +12,8 @@ Argumente: $ARGUMENTS  (ohne Projekt: das zuletzt bearbeitete; ohne Material/Qua
    nicht oder ist eine Spule fast leer: dem Nutzer sagen und Alternative vorschlagen.
 4. `slice` mit denselben Angaben. Ist `blocked` nicht leer: Gründe nennen, nicht drucken.
 5. Dem Nutzer zeigen: je Körper Spule → Farbe → Profil, Qualität/Schichthöhe, Druckzeit,
-   Filament in g (je Spule), Farbwechsel, Düse/Bett °C, Hinweise, Bild (`render.png` in Spulenfarben
+   Filament in g (je Spule), Kosten (`kosten.total` in CHF, je Spule; Standardpreis = noch kein Rollenpreis
+   hinterlegt → `filament_price` anbieten), Farbwechsel, Düse/Bett °C, Hinweise, Bild (`render.png` in Spulenfarben
    mit Read ansehen). Fragen: „Bett frei? Mit ‚drucken‘ starte ich genau diese Datei.“
 6. **Warten.** Erst wenn der Nutzer ausdrücklich „drucken“ (oder eindeutig gleichbedeutend) antwortet:
    `upload_and_print` mit dem Token aus Schritt 4.

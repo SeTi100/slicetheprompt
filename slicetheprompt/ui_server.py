@@ -20,7 +20,7 @@ import webbrowser
 
 import yaml
 
-from . import assembly as asm_mod, history, meshcheck as mc, params as params_mod, pipeline
+from . import assembly as asm_mod, history, kosten as kosten_mod, meshcheck as mc, params as params_mod, pipeline
 from .config import PROJECTS_DIR, load_config, project_dir
 from .moonraker import Moonraker
 
@@ -615,6 +615,38 @@ def get_printer_readonly_cached(ttl: float = 2.0) -> dict[str, Any]:
     return res
 
 
+_DETAILS_CACHE: dict[str, Any] = {"ts": 0.0, "data": None}
+
+
+def get_printer_details_cached(ttl: float = 10.0) -> dict[str, Any]:
+    """Sensoren, Lüfter, Statistik, Kamera usw. – seltener abgefragt als der Status."""
+    now = time.monotonic()
+    with _PRINTER_CACHE_LOCK:
+        if _DETAILS_CACHE["data"] is not None and (now - _DETAILS_CACHE["ts"]) < ttl:
+            return _DETAILS_CACHE["data"]
+    try:
+        res: dict[str, Any] = {"connected": True, **Moonraker(timeout=2.0).details()}
+    except Exception as exc:
+        res = {"connected": False, "error": str(exc)}
+    with _PRINTER_CACHE_LOCK:
+        _DETAILS_CACHE["ts"] = time.monotonic()
+        _DETAILS_CACHE["data"] = res
+    return res
+
+
+def project_costs(d: Path) -> dict[str, Any]:
+    try:
+        return {"ok": True, **kosten_mod.for_project(str(d))}
+    except FileNotFoundError as exc:
+        return {"ok": False, "not_sliced": True, "error": str(exc)}
+
+
+def prices_state() -> dict[str, Any]:
+    k = kosten_mod.settings()
+    return {"ok": True, "rollen": kosten_mod.load_prices(), "standard": k["rollen"], "waehrung": k["waehrung"],
+            "annahmen": {x: k[x] for x in ("strom_chf_kwh", "leistung_w", "verschleiss_chf_h", "fehldruck_pct")}}
+
+
 def _projects_watch_signature(projects_root: Path) -> dict[str, float]:
     sig: dict[str, float] = {}
     if not projects_root.exists():
@@ -805,6 +837,14 @@ class StudioHandler(BaseHTTPRequestHandler):
                 self._send_json(get_printer_readonly_cached())
                 return
 
+            if raw_path == "/api/printer/details":
+                self._send_json(get_printer_details_cached())
+                return
+
+            if raw_path == "/api/preise":
+                self._send_json(prices_state())
+                return
+
             if raw_path == "/api/events":
                 self._handle_sse()
                 return
@@ -821,6 +861,11 @@ class StudioHandler(BaseHTTPRequestHandler):
                     d = _resolve_project_in_root(segs[0], self.projects_root)
                     ver = (qs.get("version") or [None])[0]
                     self._send_json(build_project_state(d, version=ver))
+                    return
+
+                if len(segs) == 2 and segs[1] == "kosten":
+                    d = _resolve_project_in_root(segs[0], self.projects_root)
+                    self._send_json(project_costs(d))
                     return
 
                 if len(segs) == 2 and segs[1] == "diff":
@@ -864,6 +909,29 @@ class StudioHandler(BaseHTTPRequestHandler):
         raw_path = parsed.path
 
         try:
+            if raw_path == "/api/preise":
+                body = self._read_body_json()
+                act = body.get("action") or "set"
+                try:
+                    if act == "set":
+                        res = kosten_mod.set_price(
+                            str(body.get("name") or "").strip(),
+                            float(body["preis"]) if body.get("preis") not in (None, "") else None,
+                            float(body["gewicht_g"]) if body.get("gewicht_g") not in (None, "") else None,
+                            (body.get("url") or "").strip() or None,
+                            **{k: body.get(k) for k in ("material", "code", "profil", "farbe", "slot")})
+                    elif act == "delete":
+                        res = kosten_mod.delete_price(str(body.get("name") or ""))
+                    elif act == "refresh":
+                        res = kosten_mod.refresh_prices()
+                    else:
+                        raise ValueError(f"Unbekannte Aktion: {act}")
+                except kosten_mod.PreisFehler as exc:
+                    self._send_json({"ok": False, "error": str(exc)}, status=422)
+                    return
+                self._send_json({**res, "preise": prices_state()})
+                return
+
             if not raw_path.startswith("/api/projects/"):
                 self._send_json({"ok": False, "error": "Unbekannter POST-Endpunkt"}, status=404)
                 return

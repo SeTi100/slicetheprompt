@@ -49,3 +49,13 @@ materials:                  # Startwerte, je Seite bzw. auf den Durchmesser in m
     fan: 40
 
 default_material: pla
+
+kosten:                     # Kostenrechner (slicetheprompt/kosten.py); Rollenpreise lokal in config/preise.yaml
+  waehrung: CHF
+  strom_chf_kwh: 0.30       # Strompreis
+  leistung_w: 150           # mittlere Leistungsaufnahme des Hi beim Drucken (Bett 60 °C), Schätzwert
+  verschleiss_chf_h: 0.20   # Düse, Druckplatte, Riemen, Abschreibung je Druckstunde
+  fehldruck_pct: 0          # Zuschlag für Fehldrucke in %
+  rollen:                   # Standardpreis je Material, wenn in preise.yaml keine passende Rolle steht
+    pla: {preis: 22.90, gewicht_g: 1000}
+    petg: {preis: 24.90, gewicht_g: 1000}

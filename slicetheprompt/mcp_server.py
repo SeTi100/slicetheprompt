@@ -241,6 +241,46 @@ def printer_status() -> dict:
 
 
 @server.tool()
+def printer_details() -> dict:
+    """Alles weitere, was Moonraker lesbar liefert: Kammer-/Zusatzsensoren, Lüfter, Filamentsensoren,
+    Achsen/Position, Live-Geschwindigkeit und -Fluss, Druckstatistik (Summe, letzte Drucke), Kamera-URLs,
+    System (CPU-Temperatur, Firmware). Rein lesend."""
+    return _safe(lambda: Moonraker().details())
+
+
+@server.tool()
+def print_cost(project: str) -> dict:
+    """Kosten des zuletzt gesliceten G-Codes: Filament je Spule (Rollenpreis aus config/preise.yaml,
+    sonst Standardpreis), Strom, Verschleiss, Total in CHF. Wird auch bei `slice` unter `kosten` geliefert."""
+    from .kosten import for_project
+    return _safe(for_project, project)
+
+
+@server.tool()
+def filament_price(action: str = "list", name: str = "", preis: float = 0, gewicht_g: float = 0, url: str = "",
+                   material: str = "", code: str = "", profil: str = "", farbe: str = "", slot: str = "") -> dict:
+    """Rollenpreise pflegen. action: 'list' | 'set' | 'delete' | 'refresh'.
+    set: name (z. B. 'Hyper PLA schwarz'), preis (CHF je Rolle) und/oder url (Digitec/Galaxus-Produktlink,
+    Preis wird abgerufen), gewicht_g (Standard 1000), optional Filter material/code(RFID)/profil/farbe/slot –
+    der genaueste passende Eintrag gilt für eine Spule. Blockt der Shop den Abruf (Bot-Schutz), Preis
+    manuell angeben (z. B. selbst nachgeschlagen) – den Schutz nie umgehen."""
+    from . import kosten as K
+
+    def _run():
+        if action == "list":
+            return {"rollen": K.load_prices(), "standard": K.settings(), "datei": str(K.PREISE_YAML)}
+        if action == "set":
+            return K.set_price(name, preis or None, gewicht_g or None, url or None, material=material, code=code,
+                               profil=profil, farbe=farbe, slot=slot)
+        if action == "delete":
+            return K.delete_price(name)
+        if action == "refresh":
+            return K.refresh_prices()
+        raise ValueError("action muss list, set, delete oder refresh sein")
+    return _safe(_run)
+
+
+@server.tool()
 def upload_and_print(approval_token: str) -> dict:
     """G-Code zum Freigabe-Token auf den Hi laden und Druck STARTEN.
     Nur aufrufen, nachdem der Nutzer in diesem Chat ausdrücklich 'drucken' geschrieben hat,
