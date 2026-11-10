@@ -13,7 +13,7 @@ Der Nutzer ist kein CAD-Profi: erkläre Masse und Annahmen in Alltagssprache.
   `list_filaments`, `filament_plan`, `slice`, `printer_status`, `upload_and_print`, `print_control`,
   `calibration_part`, `apply_calibration`, `get_config`, `project_list`, `get_ui_feedback`, `clear_ui_feedback`,
   `version_list`, `version_restore`, `doctor`, `stencil`, `assembly_new`, `build_assembly`,
-  `printer_details`, `print_cost`, `filament_price`.
+  `printer_details`, `print_cost`, `filament_price`, `import_3mf`, `mesh_replace`.
 - Gleiche Funktionen als CLI (falls der MCP-Server hängt oder noch nicht neu geladen ist):
   `uv run slicetheprompt <befehl>`, z. B. `config`, `new`, `run`, `schablone`, `cfs`, `slice`.
 - **3D-GUI (`SliceThePrompt`):** `uv run slicetheprompt ui` (`http://127.0.0.1:8765`) zeigt 3D-Modell, Versionen
@@ -31,7 +31,10 @@ Der Nutzer ist kein CAD-Profi: erkläre Masse und Annahmen in Alltagssprache.
    `config/calibration.yaml`) sind verbindlich; Toleranzen nie schätzen, sondern aus `lib.parts` nehmen
    (`fit`, `hole_d`, `pin_d`, `outer`, `screw_hole_cut`, `fit_hole_cut`, `nut_trap_cut`, …).
    Aussenmasse, die irgendwo hineinpassen müssen: `outer(mass)`.
-2. Nur exakte Teile mit build123d. Kein Meshy, keine Netz-Generatoren.
+2. Masshaltige Funktionsteile immer exakt mit build123d konstruieren (dafür kein Meshy, keine Netz-Generatoren).
+   Ausnahme: Für importierte 3MF/STL-Skulpturen (`import_3mf`, Drag-and-Drop im Studio) darf `mesh_replace`
+   (`manifold3d` + `trimesh`) genutzt werden, um Bereiche auszuschneiden, runde Grundkörper (`vase_heal`)
+   zu heilen und andere 3MF/STL-Netze (z. B. Figuren/Ornamente) wasserdicht einzusetzen.
 3. Ein Projekt je Teil: `project_new`, dann **spec.yaml** ausfüllen (Zweck, Material, Qualität,
    `bbox` = Soll-Aussenmasse, `masse` mit Herkunft, `annahmen`), dann **model.py**.
    Gegenrad, Halter usw. zum selben Auftrag = eigenes Projekt (`<name>-ritzel`), damit jedes Teil

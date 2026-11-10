@@ -21,7 +21,7 @@ part = Pos(R + L / 2, 0, 0) * Box(L, STANGE_B, DICKE, align=C)
 for x in (R, R + L):
     part += Pos(x, 0, 0) * Cylinder(AUGE / 2, DICKE, align=C)
 for i, x in enumerate((R, R + L), 1):
-    part = cut_feature(part, f"auge_{i}", Pos(x, 0, -1) * Cylinder(fit(ZAPFEN) / 2, DICKE + 2, align=C))
+    part = cut_feature(part, f"auge_{i}", Pos(x, 0, -1) * fit_hole_cut(ZAPFEN, DICKE + 2))
 part = bottom_chamfer(part)
 
 # ---- Selbstprüfung ----
@@ -30,6 +30,6 @@ loecher = sorted((Pos(R + L / 2, 0, 2) * Box(L + 20, 20, 0.01, align=C) - part).
 mitten = sorted(s.bounding_box().center().X for s in loecher)
 checks = {
     "Augenabstand": (mitten[1] - mitten[0], L, 0.01),
-    "Bohrung Ø": (loecher[0].bounding_box().size.Y, fit(ZAPFEN), 0.01),
+    "Bohrung Ø": (loecher[0].bounding_box().size.Y, hole_d(fit(ZAPFEN)), 0.01),
     "Dicke": (part.bounding_box().size.Z, DICKE, 0.01),
 }

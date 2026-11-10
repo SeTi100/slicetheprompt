@@ -370,6 +370,48 @@ def version_restore(project: str, version: str) -> dict:
     return _worker("restore_version", project, version)
 
 
+@server.tool()
+def import_3mf(path: str, name: str = "") -> dict:
+    """Importiert eine lokale .3mf oder .stl Datei als Projekt unter projects/<datum>-<name>-3mf/.
+    Danach im Studio (SliceThePrompt) ansehen, mit Box/Pin markieren oder per mesh_replace bearbeiten."""
+    return _worker("import_project", path, name)
+
+
+@server.tool()
+def mesh_replace(
+    project: str,
+    replacement_path: str = "",
+    bbox: list[float] | None = None,
+    mode: str = "vase_heal",
+    trim_bottom_mm: float = 0.0,
+    scale: float | None = None,
+    rotate_z_deg: float = 0.0,
+    offset_xyz: list[float] | None = None,
+    overlap_mm: float = 2.0,
+    clear_feedback: bool = True,
+) -> dict:
+    """Ersetzt oder entfernt einen Bereich in einem 3MF/STL-Projekt (wasserdichte Mesh-Boolean-Operation via manifold3d).
+    bbox: [x_min, y_min, z_min, x_max, y_max, z_max] (leer = nutzt die im Studio gezogene Box aus ui_feedback.json).
+    replacement_path: Pfad zu einer .3mf/.stl/.obj/.glb Datei (z. B. Drachen-Modell), die an der Stelle eingesetzt wird.
+    mode: 'vase_heal' (rekonstruiert eine runde/geschwungene Vasenwand und schneidet nur überstehende Details wie eine Fee weg)
+          oder 'cut' (schneidet die gesamte Box weg) oder 'keep' (nur neues Mesh anfügen).
+    trim_bottom_mm: schneidet vom Ersatz-Mesh unten einen Sockel der Höhe trim_bottom_mm ab.
+    Erzeugt aktualisierte 3MF, out/print.stl, out/report.json und out/render.png (danach mit Read ansehen)."""
+    return _worker(
+        "replace_in_mesh",
+        project,
+        replacement_path,
+        bbox,
+        mode,
+        trim_bottom_mm,
+        scale,
+        rotate_z_deg,
+        offset_xyz,
+        overlap_mm,
+        clear_feedback,
+    )
+
+
 def main() -> None:
     if hasattr(sys.stderr, "reconfigure"):
         sys.stderr.reconfigure(encoding="utf-8")

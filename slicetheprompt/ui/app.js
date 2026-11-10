@@ -923,7 +923,7 @@ function detectFeaturesInsideModelBox(bbox6) {
 }
 
 function setTool(toolName) {
-  if (isImport() && !["orbit", "measure"].includes(toolName)) return;
+  if (isImport() && !["orbit", "pin", "box", "move", "measure"].includes(toolName)) return;
   S.tool = toolName;
   S.pendingPoint = null;
   clearGroup(previewGroup);
@@ -2652,12 +2652,12 @@ function isImport() {
 function enterOrLeaveImportMode() {
   const imported = isImport();
   document.getElementById("import-panel").classList.toggle("hidden", !imported);
-  document.getElementById("annotations-section").classList.toggle("hidden", imported);
+  document.getElementById("annotations-section").classList.remove("hidden");
   document.querySelectorAll('#tab-params .pane-section').forEach((el) => el.classList.toggle("hidden", imported));
   document.querySelectorAll('.tab-btn[data-tab="params"]').forEach((el) => el.classList.toggle("hidden", imported));
   if (imported && document.getElementById("tab-params").classList.contains("active")) switchRightTab("diagnose");
   for (const tool of ["pin", "box", "move"]) {
-    document.querySelector(`.tool-btn[data-tool="${tool}"]`).disabled = imported;
+    document.querySelector(`.tool-btn[data-tool="${tool}"]`).disabled = false;
   }
   const reload = document.getElementById("btn-rebuild-now");
   reload.textContent = imported ? "↻ Neu laden" : "↻ Neu prüfen";
@@ -2679,9 +2679,7 @@ function enterOrLeaveImportMode() {
   if (S.imported.prevViewMode === null) S.imported.prevViewMode = S.viewMode;
   S.viewMode = "model";
   S.ghostVersion = null;
-  S.annotations = [];
-  document.getElementById("general-note").value = "";
-  if (!["orbit", "measure"].includes(S.tool)) setTool("orbit");
+  if (!["orbit", "pin", "box", "move", "measure"].includes(S.tool)) setTool("orbit");
   const data = S.state.import;
   const key = JSON.stringify([S.currentProject, data.source, data.plate, data.sha256]);
   if (key !== S.imported.key) {
