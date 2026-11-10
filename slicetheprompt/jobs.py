@@ -160,6 +160,16 @@ def slice_project(project: str, material: str | None = None, quality: str | None
                      "quality": quality, "used": False,
                      "slots": [{k: p[k] for k in ("body", "slot", "tool", "type", "code", "color")} for p in plan]}
         _save(ap)
+    slots = [{"body": p["body"], "slot": p["slot"], "tool": p["tool"], "type": p["type"], "code": p["code"],
+              "color": p["color"], "profile": p["profile"]} for p in plan]
+    (d / "out" / "slice.json").write_text(json.dumps({"gcode": str(final), "material": fp["material"],
+                                                      "quality": quality, "slots": slots, "created": time.time()},
+                                                     ensure_ascii=False, indent=1), encoding="utf-8")
+    try:
+        from .kosten import for_gcode
+        kosten = for_gcode(final, slots, fp["material"])
+    except Exception as exc:  # Kosten sind Zusatzinfo, dürfen das Slicen nie scheitern lassen
+        kosten = {"fehler": str(exc)}
     return {
         "gcode": str(final), "quality": quality,
         "filamente": [{"körper": (p["body"] if fp["multicolor"] else None), "spule": p["slot"],
@@ -172,6 +182,7 @@ def slice_project(project: str, material: str | None = None, quality: str | None
         "max_bed_temp": info["max_bed_temp"], "hinweise": fp["notes"], "blocked": problems,
         "approval_token": token, "png": str(d / "out" / "render.png"),
         "slicer_dropped_options": res.get("dropped_options"),
+        "kosten": kosten,
         "hinweis": "Erst nach ausdrücklichem 'drucken' des Nutzers upload_and_print mit diesem Token aufrufen.",
     }
 

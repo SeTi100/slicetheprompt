@@ -16,7 +16,7 @@ Arbeite strikt nach `AGENTS.md` (insbesondere Regel 8 – niemals ohne ausdrück
 4. **Slicen:** `slice` (`uv run slicetheprompt slice <projekt> [...]`) ausführen. Ist `blocked` nicht leer, Gründe nennen und **nicht** drucken.
 5. **Vorschau & Kennzahlen zeigen:**
    - `out/render.png` (jetzt in den echten Spulenfarben gerendert) mit `read_file` prüfen.
-   - Dem Nutzer übersichtlich zeigen: je Körper **Spule → Werkzeug → Farbe → Profil**, Qualität/Schichthöhe, **Druckzeit**, **Filament in g** (gesamt und je Spule), Farbwechsel, Düse/Bett °C, Hinweise sowie den Freigabe-Token.
+   - Dem Nutzer übersichtlich zeigen: je Körper **Spule → Werkzeug → Farbe → Profil**, Qualität/Schichthöhe, **Druckzeit**, **Filament in g** (gesamt und je Spule), **Kosten** (`kosten.total` in CHF, je Spule; steht dort „Standardpreis“, ist noch kein Rollenpreis hinterlegt → `filament_price` anbieten), Farbwechsel, Düse/Bett °C, Hinweise sowie den Freigabe-Token.
    - Ausdrücklich fragen: **„Ist das Druckbett frei? Antworte mit `drucken`, dann lade ich genau diesen G-Code hoch und starte den Druck.“**
 6. **Warten auf Bestätigung:** Erst nachdem der Nutzer in seiner Antwort ausdrücklich „drucken“ (oder eine eindeutige Druckfreigabe für diesen Slice) geschrieben hat, `upload_and_print(approval_token)` (`uv run slicetheprompt print <token>`) aufrufen.
 7. **Start kontrollieren:** Danach `printer_status` (`uv run slicetheprompt status`) abrufen und Zustand, Zieltemperaturen und Datei bestätigen.

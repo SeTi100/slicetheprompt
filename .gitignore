@@ -16,3 +16,4 @@ projects/*
 projects/*/out/
 !projects/*/out/.gitkeep
 projects/*/history/
+config/preise.yaml

@@ -1431,6 +1431,7 @@ async function selectProject(projName, version = null, fitCam = true) {
   renderMeasureBox();
   renderParamsForm();
   renderChecksAndSpec();
+  renderCosts();
   await rebuildSceneGeometry(fitCam);
 }
 
@@ -2111,6 +2112,7 @@ async function pollPrinterStatus() {
     const cfsBar = document.getElementById("cfs-slots-bar");
 
     if (!p.connected || !p.status) {
+      S.cfs = [];
       dot.className = "conn-dot offline";
       stText.textContent = "Creality Hi offline / Ruhemodus";
       tmpText.textContent = "";
@@ -2122,9 +2124,13 @@ async function pollPrinterStatus() {
     const s = p.status;
     const pct = s.progress_pct != null ? ` (${Number(s.progress_pct).toFixed(0)} %)` : "";
     stText.textContent = `Creality Hi: ${s.state || "bereit"}${pct}`;
-    const noz = s.nozzle_temp != null ? `${Number(s.nozzle_temp).toFixed(0)}°C` : "–";
-    const bed = s.bed_temp != null ? `${Number(s.bed_temp).toFixed(0)}°C` : "–";
-    tmpText.textContent = `Düse ${noz} · Bett ${bed}`;
+    const tC = (v, t) => (v != null ? `${Number(v).toFixed(0)}${t ? `/${Number(t).toFixed(0)}` : ""}°C` : "–");
+    const parts = [`Düse ${tC(s.nozzle_c, s.nozzle_target_c)}`, `Bett ${tC(s.bed_c, s.bed_target_c)}`];
+    if (s.layer != null && s.layers_total) parts.push(`Schicht ${s.layer}/${s.layers_total}`);
+    if (s.remaining_min != null && s.state === "printing") parts.push(`noch ${fmtMin(s.remaining_min)}`);
+    tmpText.textContent = parts.join(" · ");
+    S.cfs = p.cfs || [];
+    fillSlotSelect();
 
     cfsBar.innerHTML = (p.cfs || [])
       .map((sl) => {
@@ -2140,12 +2146,236 @@ async function pollPrinterStatus() {
   }
 }
 
+
+// ============================================================================
+// Kosten & Drucker-Details
+// ============================================================================
+function fmtMin(m) {
+  const v = Math.round(Number(m) || 0);
+  return v >= 60 ? `${Math.floor(v / 60)} h ${v % 60} min` : `${v} min`;
+}
+
+function chf(v, cur = "CHF") {
+  return `${cur} ${Number(v || 0).toFixed(2)}`;
+}
+
+async function renderCosts() {
+  const box = document.getElementById("cost-box");
+  if (!box || !S.currentProject) return;
+  if (isAssembly()) {
+    box.innerHTML = `<span class="status-muted">Baugruppen werden nicht gedruckt – Kosten je Teil-Projekt ansehen.</span>`;
+    return;
+  }
+  const proj = S.currentProject;
+  let k;
+  try {
+    k = await apiFetch(`/api/projects/${encodeURIComponent(proj)}/kosten`);
+  } catch (e) {
+    box.innerHTML = `<span class="status-muted">Kosten nicht berechenbar: ${escapeHtml(e.message)}</span>`;
+    return;
+  }
+  if (proj !== S.currentProject) return;
+  if (!k.ok) {
+    box.innerHTML = `<span class="status-muted">${k.not_sliced ? "Noch nicht gesliced – nach dem Slicen erscheinen hier die Kosten." : escapeHtml(k.error || "")}</span>`;
+    return;
+  }
+  const cur = k.waehrung || "CHF";
+  const rows = (k.posten || [])
+    .map((p) => {
+      const sw = p.farbe ? `<span class="cost-swatch" style="background:${escapeAttr(p.farbe)}"></span>` : "";
+      const src = p.quelle && !p.quelle.startsWith("standard")
+        ? ` · ${escapeHtml(p.quelle)}${p.stand ? " " + escapeHtml(p.stand) : ""}`
+        : " · Standardpreis";
+      return `<tr><td>${sw}${escapeHtml(p.werkzeug)}${p.spule ? " (" + escapeHtml(p.spule) + ")" : ""} ${escapeHtml(p.material || "")} · ${p.gramm} g<br><span class="status-muted">${escapeHtml(p.rolle)} ${chf(p.rollenpreis, cur)}/${Math.round(p.rollengewicht_g)} g${src}</span></td><td class="num">${chf(p.chf, cur)}</td></tr>`;
+    })
+    .join("");
+  const a = k.annahmen || {};
+  box.innerHTML = `
+    <div><span class="cost-total">${chf(k.total, cur)}</span> <span class="status-muted">· ${k.gramm} g · ${escapeHtml(k.zeit || fmtMin(k.stunden * 60))}</span></div>
+    <table class="cost-table">
+      ${rows}
+      <tr><td>Strom (${a.leistung_w} W × ${a.strom_chf_kwh} ${cur}/kWh)</td><td class="num">${chf(k.strom, cur)}</td></tr>
+      <tr><td>Verschleiss (${a.verschleiss_chf_h} ${cur}/h)</td><td class="num">${chf(k.verschleiss, cur)}</td></tr>
+      ${k.fehldruck_zuschlag ? `<tr><td>Fehldruck-Zuschlag (${a.fehldruck_pct} %)</td><td class="num">${chf(k.fehldruck_zuschlag, cur)}</td></tr>` : ""}
+    </table>
+    <span class="status-muted">G-Code: ${escapeHtml(k.gcode || "")} · Annahmen in config/printer.yaml → kosten</span>`;
+}
+
+async function loadPrices() {
+  const wrap = document.getElementById("price-list");
+  if (!wrap) return;
+  try {
+    renderPrices(await apiFetch("/api/preise"));
+  } catch (e) {
+    wrap.innerHTML = `<span class="status-muted">${escapeHtml(e.message)}</span>`;
+  }
+}
+
+function renderPrices(st) {
+  const wrap = document.getElementById("price-list");
+  const cur = st.waehrung || "CHF";
+  const items = (st.rollen || []).map((r) => {
+    const filt = ["material", "slot", "farbe", "code", "profil"].filter((f) => r[f]).map((f) => `${f}: ${r[f]}`).join(" · ");
+    const src = r.url
+      ? `<a href="${escapeAttr(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.quelle || "Link")}</a>`
+      : escapeHtml(r.quelle || "manuell");
+    return `<div class="price-item"><div class="pi-main"><span class="pi-name" title="${escapeAttr(r.titel || r.name)}">${escapeHtml(r.name)}</span>
+      <span class="status-muted">${chf(r.preis, cur)} / ${Math.round(r.gewicht_g || 1000)} g · ${src}${r.stand ? " · " + escapeHtml(r.stand) : ""}${filt ? "<br>" + escapeHtml(filt) : ""}</span></div>
+      <span><button class="btn-xs" data-price-edit="${escapeAttr(r.name)}" title="Bearbeiten">✎</button>
+      <button class="btn-xs btn-danger" data-price-del="${escapeAttr(r.name)}" title="Löschen">✕</button></span></div>`;
+  });
+  const std = Object.entries(st.standard || {})
+    .map(([m, v]) => `${m.toUpperCase()} ${chf(v.preis, cur)}/${Math.round(v.gewicht_g || 1000)} g`)
+    .join(" · ");
+  wrap.innerHTML = items.join("") + `<span class="status-muted">Standard (ohne passende Rolle): ${escapeHtml(std)}</span>`;
+  S.prices = st.rollen || [];
+}
+
+function fillSlotSelect() {
+  const sel = document.getElementById("pf-slot");
+  if (!sel) return;
+  const opts = (S.cfs || []).filter((x) => x.loaded);
+  const sig = opts.map((x) => x.slot + x.color + x.code).join("|");
+  if (sel.dataset.sig === sig) return;
+  const keep = sel.value;
+  sel.dataset.sig = sig;
+  sel.innerHTML = `<option value="">Spule: alle</option>` +
+    opts.map((x) => `<option value="${escapeAttr(x.slot)}">${escapeHtml(x.slot)} ${escapeHtml(x.type || "")} ${escapeHtml(x.color_name || "")}</option>`).join("");
+  sel.value = keep;
+}
+
+async function savePrice() {
+  const v = (id) => document.getElementById(id).value.trim();
+  const slot = v("pf-slot");
+  const body = {
+    action: "set",
+    name: v("pf-name"),
+    preis: v("pf-preis").replace(",", ".") || null,
+    gewicht_g: v("pf-gewicht").replace(",", ".") || null,
+    url: v("pf-url") || null,
+    material: v("pf-material") || null,
+  };
+  if (slot) {
+    // Spule gewählt = deren Merkmale übernehmen (der Platz wechselt, Material/Farbe/RFID-Code nicht)
+    const sp = (S.cfs || []).find((x) => x.slot === slot);
+    if (sp) Object.assign(body, { material: (sp.type || "").toLowerCase() || body.material, farbe: sp.color, code: sp.code });
+  }
+  if (!body.name) {
+    showToast("Bitte einen Namen für die Rolle eingeben");
+    return;
+  }
+  const btn = document.getElementById("btn-price-save");
+  btn.disabled = true;
+  try {
+    const res = await fetch("/api/preise", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    renderPrices(data.preise);
+    showToast(data.hinweis ? `Gespeichert – Hinweis: ${data.hinweis}` : `Gespeichert: ${data.rolle.name} ${chf(data.rolle.preis)}`);
+    ["pf-name", "pf-preis", "pf-gewicht", "pf-url"].forEach((id) => (document.getElementById(id).value = ""));
+    renderCosts();
+  } catch (e) {
+    showToast(`Preis nicht gespeichert: ${e.message}`);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function priceAction(action, name) {
+  try {
+    const data = await apiFetch("/api/preise", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action, name }),
+    });
+    renderPrices(data.preise);
+    if (action === "refresh") {
+      const errs = (data.rollen || []).filter((r) => r.fehler);
+      showToast(errs.length ? `${errs.length} Abruf(e) blockiert – bisherige Preise bleiben` : "Preise aktualisiert");
+    }
+    renderCosts();
+  } catch (e) {
+    showToast(`Fehler: ${e.message}`);
+  }
+}
+
+function editPrice(name) {
+  const r = (S.prices || []).find((x) => x.name === name);
+  if (!r) return;
+  document.getElementById("price-form-wrap").open = true;
+  document.getElementById("pf-name").value = r.name;
+  document.getElementById("pf-preis").value = r.preis ?? "";
+  document.getElementById("pf-gewicht").value = r.gewicht_g ?? "";
+  document.getElementById("pf-url").value = r.url || "";
+  document.getElementById("pf-material").value = r.material || "";
+}
+
+async function loadPrinterDetails(force = false) {
+  const box = document.getElementById("printer-details");
+  if (!box) return;
+  if (!force && !document.getElementById("tab-kosten").classList.contains("active")) return;
+  let d;
+  try {
+    d = await apiFetch("/api/printer/details");
+  } catch (e) {
+    box.innerHTML = `<span class="status-muted">${escapeHtml(e.message)}</span>`;
+    return;
+  }
+  if (!d.connected) {
+    box.innerHTML = `<span class="status-muted" title="${escapeAttr(d.error || "")}">Drucker nicht erreichbar (Ruhemodus oder falsche IP in config/printer.yaml).</span>`;
+    return;
+  }
+  const kv = [];
+  const add = (k, v) => v != null && v !== "" && kv.push(`<span>${escapeHtml(k)}</span><span>${v}</span>`);
+  (d.sensors || []).forEach((x) =>
+    add(x.name === "mcu_temp" ? "Platine" : x.name,
+      `${x.c} °C${x.target ? ` → ${x.target} °C` : ""}${x.humidity_pct != null ? ` · ${x.humidity_pct} % Feuchte` : ""}`));
+  (d.fans || []).forEach((x) => add(`Lüfter ${x.name}`, `${x.pct} %${x.rpm ? ` · ${x.rpm} U/min` : ""}`));
+  const fs = (d.filament_sensors || []).filter((x) => x.enabled !== false);
+  if (fs.length) add("Filamentsensoren", `${fs.length} aktiv · ${fs.filter((x) => x.filament).length} melden Filament`);
+  const led = (d.pins || []).find((x) => x.name.toLowerCase() === "led");
+  if (led) add("Licht", led.value ? "an" : "aus");
+  if (d.live) add("Live", `${d.live.velocity_mm_s} mm/s · ${d.live.flow_mm3_s} mm³/s`);
+  if (d.toolhead) add("Achsen", `${escapeHtml(d.toolhead.homed || "nicht referenziert")} · ${(d.toolhead.position || []).join(" / ")}`);
+  if (d.objects_in_print?.length) add("Objekte", `${d.objects_in_print.length} (${(d.excluded_objects || []).length} ausgelassen)`);
+  if (d.system) add("System", `${d.system.cpu_temp_c != null ? `CPU ${d.system.cpu_temp_c} °C · ` : ""}Last ${d.system.load ?? "–"}`);
+  if (d.history_totals) {
+    const h = d.history_totals;
+    add("Gesamt", `${h.jobs} Drucke · ${h.print_h} h · ${h.filament_m} m Filament`);
+  }
+  if (d.machine) add("Firmware", escapeHtml(`Moonraker ${d.machine.moonraker || "?"} · Klipper ${d.machine.klipper_state || "?"}`));
+  const last = (d.history_last || [])
+    .map((j) => `<tr><td>${escapeHtml((j.file || "").replace(/\.gcode$/, "").replace(/^stp_\d{8}-\d{4}_/, ""))}</td><td class="num" title="${escapeAttr(j.status || "")}">${{ completed: "✓", cancelled: "✕", error: "⚠" }[j.status] || escapeHtml(j.status || "")} ${fmtMin(j.print_min)}</td></tr>`)
+    .join("");
+  const wartung = (d.wartung || [])
+    .slice(0, 6)
+    .map((w) => {
+      const col = w.faellig || w.pct >= 100 ? "var(--red)" : w.pct >= 80 ? "var(--amber)" : "var(--green)";
+      return `<div class="wt-row" title="${escapeAttr(w.gruppe)}"><span>${escapeHtml(w.name)}${w.faellig ? " – fällig" : ""}</span>
+        <span class="wt-bar"><span style="width:${Math.min(100, w.pct)}%;background:${col}"></span></span><span class="num">${w.pct} %</span></div>`;
+    })
+    .join("");
+  const cam = (d.webcams || [])[0];
+  const camUrl = cam && (cam.snapshot || cam.stream);
+  const camHtml = camUrl
+    ? `<img class="cam-img" alt="Kamera ${escapeAttr(cam.name || "")}" src="${escapeAttr(camUrl + (camUrl.includes("?") ? "&" : "?") + "t=" + Date.now())}">`
+    : "";
+  box.innerHTML = `${camHtml}<div class="kv-grid">${kv.join("") || "<span>–</span><span>keine Zusatzdaten</span>"}</div>
+    ${wartung ? `<div class="section-header" style="margin:6px 0 0">Wartung (Creality-Zähler)</div><div class="wt-list">${wartung}</div>` : ""}
+    ${last ? `<div class="section-header" style="margin:6px 0 0">Letzte Drucke</div><table class="cost-table">${last}</table>` : ""}`;
+}
+
 // ============================================================================
 // UI Event Bindings & Utilities
 // ============================================================================
 function switchRightTab(tabId) {
   document.querySelectorAll(".tab-btn").forEach((b) => b.classList.toggle("active", b.dataset.tab === tabId));
   document.querySelectorAll(".tab-pane").forEach((p) => p.classList.toggle("active", p.id === `tab-${tabId}`));
+  if (tabId === "kosten") loadPrinterDetails(true);
 }
 
 function showToast(msg) {
@@ -2169,6 +2399,17 @@ function escapeAttr(s) {
 }
 
 function bindEvents() {
+  // Kosten & Drucker
+  document.getElementById("btn-cost-reload").addEventListener("click", () => renderCosts());
+  document.getElementById("btn-price-save").addEventListener("click", () => savePrice());
+  document.getElementById("btn-prices-refresh").addEventListener("click", () => priceAction("refresh"));
+  document.getElementById("btn-details-reload").addEventListener("click", () => loadPrinterDetails(true));
+  document.getElementById("price-list").addEventListener("click", (e) => {
+    const del = e.target.closest("[data-price-del]");
+    if (del && confirm(`Rolle „${del.dataset.priceDel}“ löschen?`)) priceAction("delete", del.dataset.priceDel);
+    const ed = e.target.closest("[data-price-edit]");
+    if (ed) editPrice(ed.dataset.priceEdit);
+  });
   // Project select
   document.getElementById("project-select").addEventListener("change", (e) => {
     selectProject(e.target.value, null, true);
@@ -3360,4 +3601,6 @@ function animate() {
   connectSSE();
   pollPrinterStatus();
   setInterval(pollPrinterStatus, 4000);
+  loadPrices();
+  setInterval(() => loadPrinterDetails(false), 15000);
 })();

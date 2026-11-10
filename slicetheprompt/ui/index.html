@@ -202,6 +202,7 @@
         </button>
         <button class="tab-btn" data-tab="params">Parameter</button>
         <button class="tab-btn" data-tab="specs">Checks &amp; Spec</button>
+        <button class="tab-btn" data-tab="kosten" title="Kosten &amp; Drucker-Details">Kosten</button>
       </nav>
 
       <!-- TAB 1: DIAGNOSE & MARKIERUNG -->
@@ -285,6 +286,51 @@
             <summary>Quellcode <code>model.py</code> anzeigen</summary>
             <pre id="model-code-view" class="code-block"></pre>
           </details>
+        </div>
+      </section>
+      <!-- TAB 4: KOSTEN & DRUCKER -->
+      <section id="tab-kosten" class="tab-pane">
+        <div class="pane-section">
+          <div class="section-header">
+            <span>Druckkosten (letzter Slice)</span>
+            <button id="btn-cost-reload" class="btn-xs" title="Neu berechnen">↻</button>
+          </div>
+          <div id="cost-box" class="spec-details"><span class="status-muted">Projekt wählen …</span></div>
+        </div>
+
+        <div class="pane-section">
+          <div class="section-header">
+            <span>Rollenpreise</span>
+            <button id="btn-prices-refresh" class="btn-xs" title="Alle Links bei Digitec/Galaxus neu abrufen">↻ Shops</button>
+          </div>
+          <div id="price-list" class="price-list"></div>
+          <details class="code-details" id="price-form-wrap">
+            <summary>Rolle hinzufügen / ändern</summary>
+            <div class="price-form">
+              <input id="pf-name" class="select-input" placeholder="Name, z. B. Hyper PLA schwarz">
+              <div class="price-row">
+                <input id="pf-preis" class="select-input" inputmode="decimal" placeholder="Preis CHF">
+                <input id="pf-gewicht" class="select-input" inputmode="decimal" placeholder="Gewicht g (1000)">
+              </div>
+              <input id="pf-url" class="select-input" placeholder="Digitec-/Galaxus-Link (optional, Preis wird abgerufen)">
+              <div class="price-row">
+                <select id="pf-material" class="select-input">
+                  <option value="">Material: alle</option><option value="pla">PLA</option><option value="petg">PETG</option>
+                </select>
+                <select id="pf-slot" class="select-input"><option value="">Spule: alle</option></select>
+              </div>
+              <p class="hint-text">Ohne Preis wird der Link abgerufen. Blockt der Shop (Bot-Schutz), Preis von Hand eintragen. Wählst du eine Spule, gilt die Rolle nur für deren Material, Farbe und RFID-Code.</p>
+              <button id="btn-price-save" class="btn-primary full-width">💾 Preis speichern</button>
+            </div>
+          </details>
+        </div>
+
+        <div class="pane-section">
+          <div class="section-header">
+            <span>Drucker-Details (Moonraker)</span>
+            <button id="btn-details-reload" class="btn-xs" title="Neu abfragen">↻</button>
+          </div>
+          <div id="printer-details" class="spec-details"><span class="status-muted">Wird abgefragt …</span></div>
         </div>
       </section>
     </aside>

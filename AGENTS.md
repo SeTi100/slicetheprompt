@@ -12,7 +12,8 @@ Der Nutzer ist kein CAD-Profi: erkläre Masse und Annahmen in Alltagssprache.
   bzw. `… install antigravity`): `project_new`, `build_and_check`, `check_report`, `render_views`, `cfs_status`,
   `list_filaments`, `filament_plan`, `slice`, `printer_status`, `upload_and_print`, `print_control`,
   `calibration_part`, `apply_calibration`, `get_config`, `project_list`, `get_ui_feedback`, `clear_ui_feedback`,
-  `version_list`, `version_restore`, `doctor`, `stencil`, `assembly_new`, `build_assembly`.
+  `version_list`, `version_restore`, `doctor`, `stencil`, `assembly_new`, `build_assembly`,
+  `printer_details`, `print_cost`, `filament_price`.
 - Gleiche Funktionen als CLI (falls der MCP-Server hängt oder noch nicht neu geladen ist):
   `uv run slicetheprompt <befehl>`, z. B. `config`, `new`, `run`, `schablone`, `cfs`, `slice`.
 - **3D-GUI (`SliceThePrompt`):** `uv run slicetheprompt ui` (`http://127.0.0.1:8765`) zeigt 3D-Modell, Versionen
@@ -84,6 +85,16 @@ Der Nutzer ist kein CAD-Profi: erkläre Masse und Annahmen in Alltagssprache.
   ehrlich melden (nächstliegende Farbe nennen) statt still zu ersetzen.
 - Vor dem Slicen `filament_plan` aufrufen; nach dem Slicen die Zuordnung Körper → Spule → Farbe →
   Profil, Gramm je Spule und Hinweise (fast leer, Materialmix) zeigen.
+
+## Kosten (Ablauf in `drucken`)
+- `slice` liefert `kosten` (CHF): Filament je Spule + Strom + Verschleiss (+ optional Fehldruck-Zuschlag);
+  `print_cost(project)` rechnet es für den letzten Slice neu. Annahmen (Strompreis, Leistung, Verschleiss,
+  Standardpreis je Material) stehen in `config/printer.yaml` → `kosten`.
+- Rollenpreise lokal in `config/preise.yaml` (nicht im Git), gepflegt mit `filament_price(action="set", name=…,
+  preis=… | url=…, material/code/farbe/slot=…)` oder im Studio (Tab „Kosten“). Der genaueste passende Eintrag gilt.
+- `url` nur Digitec/Galaxus. Deren Bot-Schutz blockt Abrufe meist (HTTP 403): dann den Preis manuell setzen
+  (Nutzer fragen oder selbst im Browser nachsehen) – den Schutz **nie** umgehen.
+- `printer_details` liefert Zusatzsensoren, Lüfter, Filamentsensoren, Druckstatistik, Kamera-URL, Firmware.
 
 ## Schablone (Passungs-Testdruck, Ablauf `schablone`)
 - `stencil(project, z=[…], height=2)` (CLI: `uv run slicetheprompt schablone <projekt> --z 0 12 --hoehe 2`)
