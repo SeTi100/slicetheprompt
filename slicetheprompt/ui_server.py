@@ -9,6 +9,7 @@ import base64
 import datetime as dt
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import math
 import mimetypes
 from pathlib import Path, PurePosixPath
 import socket
@@ -91,10 +92,16 @@ def list_projects_summary(projects_root: Path = PROJECTS_DIR) -> list[dict[str, 
     for d in sorted(projects_root.iterdir()):
         if import3mf.project_kind(d) == "import":
             sources = import3mf.source_files(d)
+            out = d / "out"
+            rep = _read_json(out / "report.json") or {}
             items.append({"project": d.name, "kind": "import", "beschreibung": "3MF-Import",
-                          "material": "", "built": False, "passed": None, "errors_count": 0,
-                          "warnings_count": 0, "size_mm": None, "bodies": None,
-                          "version_count": 0, "latest_version": None, "has_feedback": False,
+                          "material": "", "built": (out / "print.stl").exists(),
+                          "passed": rep.get("passed") if rep else None,
+                          "errors_count": len(rep.get("errors") or []),
+                          "warnings_count": len(rep.get("warnings") or []),
+                          "size_mm": rep.get("model", {}).get("size_mm"), "bodies": None,
+                          "version_count": 0, "latest_version": None,
+                          "has_feedback": (out / "ui_feedback.json").exists(),
                           "sources": [p.name for p in sources],
                           "mtime": max(p.stat().st_mtime for p in sources)})
             continue
@@ -260,12 +267,17 @@ def build_import_state(d: Path, filename: str | None = None, plate: str | None =
     if bodies:
         size = [round(max(b["bbox"][1][i] for b in bodies) - min(b["bbox"][0][i] for b in bodies), 4)
                 for i in range(3)]
+    out = d / "out"
+    rep = _read_json(out / "report.json") or {}
+    fb = _read_json(out / "ui_feedback.json")
+    stamp = int((out / "render.png").stat().st_mtime * 1000) if (out / "render.png").exists() else 0
     bed = cfg.get("printer", {}).get("bed", {})
     return {"kind": "import", "project": d.name, "version": None, "latest_version": None,
             "is_historical": False, "spec": {}, "model_code": "", "params": [],
-            "build": {"size_mm": size}, "print_info": {}, "report": {}, "diagnostics": {},
-            "feedback": None, "versions": [], "colors": {}, "meshes": meshes, "ghost_meshes": [],
-            "full_print_stl_url": None, "full_model_stl_url": None, "render_png_url": None,
+            "build": {"size_mm": size}, "print_info": {}, "report": rep, "diagnostics": {},
+            "feedback": fb, "versions": [], "colors": {}, "meshes": meshes, "ghost_meshes": [],
+            "full_print_stl_url": None, "full_model_stl_url": None,
+            "render_png_url": f"{base}out/render.png?t={stamp}" if (out / "render.png").exists() else None,
             "orientations": [], "printer_bed": {"x": bed.get("x", 260), "y": bed.get("y", 260),
                 "z": bed.get("z", 300), "usable_xy": cfg.get("rules", {}).get("max_part_xy", [250, 250])},
             "import": {"sources": sources, "source": filename, "sha256": data.get("sha256"),
@@ -562,6 +574,18 @@ def _enrich_feedback_for_agent(d: Path, data: dict[str, Any]) -> None:
                         bmax = [round(max(c[i] for c in corners), 2) for i in range(3)]
                         bsize = [round(bmax[i] - bmin[i], 2) for i in range(3)]
                         ann["part_bbox_print"] = {"min": bmin, "max": bmax, "size": bsize}
+    elif import3mf.project_kind(d) == "import":
+        data["project_kind"] = "import"
+        data["target_project"] = d.name
+        try:
+            prev = import3mf.preview(d)
+            data["import_source"] = prev.get("source")
+            data["import_bodies"] = [
+                {"id": b["id"], "name": b["name"], "size_mm": b["size_mm"], "bbox": b["bbox"]}
+                for b in prev.get("bodies", [])
+            ]
+        except Exception:
+            pass
     else:
         data["project_kind"] = "part"
         data["target_project"] = d.name
@@ -755,7 +779,15 @@ class StudioHandler(BaseHTTPRequestHandler):
         return getattr(self.server, "projects_dir", PROJECTS_DIR).resolve()
 
     def _send_json(self, obj: Any, status: int = 200) -> None:
-        raw = json.dumps(obj, ensure_ascii=False, default=float).encode("utf-8")
+        def _sanitize(x: Any) -> Any:
+            if isinstance(x, float):
+                return 999.0 if math.isinf(x) else (None if math.isnan(x) else x)
+            if isinstance(x, dict):
+                return {k: _sanitize(v) for k, v in x.items()}
+            if isinstance(x, (list, tuple)):
+                return [_sanitize(v) for v in x]
+            return x
+        raw = json.dumps(_sanitize(obj), ensure_ascii=False, default=float).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(raw)))
@@ -915,6 +947,11 @@ class StudioHandler(BaseHTTPRequestHandler):
                         filename=(qs.get("file") or [None])[0], plate=(qs.get("plate") or [None])[0]))
                     return
 
+                if len(segs) == 2 and segs[1] == "feedback":
+                    d = _resolve_project_in_root(segs[0], self.projects_root)
+                    self._send_json(read_project_feedback(d.name, self.projects_root))
+                    return
+
                 if len(segs) == 2 and segs[1] == "kosten":
                     d = _resolve_project_in_root(segs[0], self.projects_root)
                     self._send_json(project_costs(d))
@@ -1033,13 +1070,13 @@ class StudioHandler(BaseHTTPRequestHandler):
             body = self._read_body_json()
             lock: threading.Lock = getattr(self.server, "build_lock", threading.Lock())
 
-            if import3mf.project_kind(d) == "import":
-                self._send_json({"ok": False, "error": "3MF-Import ist eine Vorschau. CAD-Änderungen und CAD-Neubau sind hier nicht verfügbar."}, status=409)
-                return
-
             if action == "feedback":
                 rec = save_project_feedback(d, body)
                 self._send_json({"ok": True, "feedback": rec})
+                return
+
+            if import3mf.project_kind(d) == "import":
+                self._send_json({"ok": False, "error": "3MF-Import ist eine Vorschau. CAD-Änderungen und CAD-Neubau sind hier nicht verfügbar."}, status=409)
                 return
 
             if action == "params":

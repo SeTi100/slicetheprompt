@@ -384,11 +384,12 @@ def overhang_stats(tris: np.ndarray, max_overhang_deg: float, max_bridge: float,
                 continue
             pts = tris[grp].reshape(-1, 3)
             span = _bridge_span(tris, faces, grp, emap)
+            is_inf = math.isinf(span) or math.isnan(span)
             res["bridges"].append({
                 "z": round(float(pts[:, 2].mean()), 2),
-                "span_mm": round(span, 1),
+                "span_mm": 999.0 if is_inf else round(span, 1),
                 "area_mm2": round(area, 1),
-                "ok": span <= max_bridge,
+                "ok": False if is_inf else span <= max_bridge,
             })
         res["bridges"].sort(key=lambda b: -b["span_mm"])
     # Überhang ohne die Brückenflächen, die als ok gelten

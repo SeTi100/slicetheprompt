@@ -242,6 +242,8 @@ def _dump_profile(data: dict, name: str, kind: str, path: Path, machine_system: 
         data["compatible_printers_condition"] = ""
         if kind == "process":
             data["print_settings_id"] = name
+            # Arachne als Standard: variable Linienbreite, keine stotternden Mikro-Gap-Fills
+            data["wall_generator"] = "arachne"
         else:
             data["filament_settings_id"] = [name]
     path.parent.mkdir(parents=True, exist_ok=True)

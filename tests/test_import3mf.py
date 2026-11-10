@@ -190,10 +190,18 @@ class ImportTests(unittest.TestCase):
                 self.assertEqual(state["import"]["source"], "Gehäuse mit Deckel.3mf")
             with urllib.request.urlopen(base + state["meshes"][0]["model_url"]) as response:
                 self.assertGreater(len(response.read()), 84)
-            for action in ("params", "rebuild", "feedback", "restore"):
+            for action in ("params", "rebuild", "restore"):
                 with self.assertRaises(urllib.error.HTTPError) as error:
                     urllib.request.urlopen(urllib.request.Request(url + "/" + action, b"{}", {"Content-Type": "application/json"}))
                 self.assertEqual(error.exception.code, 409)
+            fb_req = urllib.request.Request(
+                url + "/feedback",
+                json.dumps({"annotations": [{"type": "box", "bbox_model": [0, 0, 0, 5, 5, 5]}]}).encode(),
+                {"Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(fb_req) as response:
+                self.assertEqual(response.status, 200)
+                self.assertTrue(json.load(response)["ok"])
             with self.assertRaises(urllib.error.HTTPError) as error:
                 urllib.request.urlopen(urllib.request.Request(base + "/api/imports", payload,
                     {**headers, "Origin": "https://other.example"}))

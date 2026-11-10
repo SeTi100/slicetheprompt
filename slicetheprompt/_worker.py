@@ -15,7 +15,7 @@ import traceback
 
 
 def _funcs() -> dict:
-    from . import assembly, history, pipeline
+    from . import assembly, history, mesh_edit, pipeline
     return {
         "build_assembly": assembly.build_assembly,
         "check_state": assembly.check_state,
@@ -24,6 +24,9 @@ def _funcs() -> dict:
         "render": pipeline.render,
         "new_stencil": pipeline.new_stencil,
         "restore_version": history.restore_version,
+        "import_project": mesh_edit.import_project,
+        "replace_in_mesh": mesh_edit.replace_in_mesh,
+        "prepare_import": mesh_edit.prepare_import,
     }
 
 

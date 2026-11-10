@@ -111,7 +111,11 @@ def slice_project(project: str, material: str | None = None, quality: str | None
     quality = (quality or spec.get("qualitaet") or "standard").lower()
     report_p = d / "out" / "report.json"
     if not report_p.exists():
-        raise RuntimeError("Erst prüfen (build_and_check), dann slicen")
+        from . import import3mf, mesh_edit
+        if import3mf.project_kind(d) == "import":
+            mesh_edit.prepare_import(project)
+        else:
+            raise RuntimeError("Erst prüfen (build_and_check), dann slicen")
     report = json.loads(report_p.read_text(encoding="utf-8"))
     if not report.get("passed"):
         raise RuntimeError("Prüfung nicht bestanden – Fehler zuerst beheben: "

@@ -6,11 +6,11 @@ echo ==========================================================
 echo   SliceThePrompt - 3D-Pruefstand (Creality Hi Combo)
 echo ==========================================================
 
-REM Starte ueber uv
-uv run slicetheprompt ui %*
+REM Starte ueber uv mit --no-sync (vermeidet Sperrfehler, wenn MCP im Hintergrund laeuft)
+uv run --no-sync slicetheprompt ui %*
 
-if %ERRORLEVEL% NEQ 0 (
+if errorlevel 1 (
     echo.
-    echo Ein Fehler ist aufgetreten (Fehlercode: %ERRORLEVEL%).
+    echo Ein Fehler ist aufgetreten - Fehlercode: %ERRORLEVEL%
     pause
 )

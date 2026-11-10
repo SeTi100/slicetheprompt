@@ -238,6 +238,22 @@ def main(argv=None) -> int:
     s.add_argument("project")
     s.add_argument("version")
 
+    s = sub.add_parser("import", help="3MF/STL-Datei als Projekt importieren")
+    s.add_argument("path")
+    s.add_argument("--name", default="")
+
+    s = sub.add_parser("mesh-replace", help="Bereich in einem 3MF/STL-Projekt entfernen und optional durch anderes Mesh ersetzen")
+    s.add_argument("project")
+    s.add_argument("--replace", default="", help="Pfad zur Ersatz-3MF/STL-Datei")
+    s.add_argument("--bbox", nargs=6, type=lambda v: float(v.replace(",", ".")), default=None,
+                   help="x_min y_min z_min x_max y_max z_max (leer = Box aus ui_feedback.json)")
+    s.add_argument("--mode", choices=["vase_heal", "cut", "keep"], default="vase_heal")
+    s.add_argument("--trim-bottom", type=lambda v: float(v.replace(",", ".")), default=0.0)
+    s.add_argument("--scale", type=lambda v: float(v.replace(",", ".")), default=None)
+    s.add_argument("--rotate-z", type=lambda v: float(v.replace(",", ".")), default=0.0)
+    s.add_argument("--offset", nargs=3, type=lambda v: float(v.replace(",", ".")), default=None)
+    s.add_argument("--overlap", type=lambda v: float(v.replace(",", ".")), default=2.0)
+
     a = ap.parse_args(argv)
     try:
         if a.cmd == "setup":
@@ -360,6 +376,22 @@ def main(argv=None) -> int:
         elif a.cmd == "restore":
             from . import history
             _out(history.restore_version(a.project, a.version))
+        elif a.cmd == "import":
+            from . import mesh_edit
+            _out(mesh_edit.import_project(a.path, a.name))
+        elif a.cmd == "mesh-replace":
+            from . import mesh_edit
+            _out(mesh_edit.replace_in_mesh(
+                a.project,
+                replacement_path=a.replace,
+                bbox=a.bbox,
+                mode=a.mode,
+                trim_bottom_mm=a.trim_bottom,
+                scale=a.scale,
+                rotate_z_deg=a.rotate_z,
+                offset_xyz=a.offset,
+                overlap_mm=a.overlap,
+            ))
     except Exception as exc:
         print(f"FEHLER: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1
