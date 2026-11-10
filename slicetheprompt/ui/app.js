@@ -255,6 +255,72 @@ function clearGroup(group) {
   }
 }
 
+// Präziser Punktmarker: Fadenkreuz mit offener Mitte + 1-px-Kernpunkt, feste
+// Bildschirmgrösse (unabhängig vom Zoom), immer über dem Modell gezeichnet.
+// Ersetzt die früheren Kugeln, die den exakten Punkt verdeckt haben.
+let _markerTex = null;
+function markerTexture() {
+  if (_markerTex) return _markerTex;
+  const N = 128, c = N / 2;
+  const cv = document.createElement("canvas");
+  cv.width = cv.height = N;
+  const g = cv.getContext("2d");
+  const draw = (stroke, w) => {
+    g.strokeStyle = stroke;
+    g.lineWidth = w;
+    g.lineCap = "round";
+    g.beginPath();
+    g.arc(c, c, 30, 0, Math.PI * 2);
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      g.moveTo(c + dx * 12, c + dy * 12);
+      g.lineTo(c + dx * 58, c + dy * 58);
+    }
+    g.stroke();
+  };
+  draw("rgba(0,0,0,0.85)", 12);   // dunkler Rand für Kontrast auf hellen Flächen
+  draw("#ffffff", 5);             // wird über material.color eingefärbt
+  g.fillStyle = "rgba(0,0,0,0.9)";
+  g.beginPath(); g.arc(c, c, 5.5, 0, Math.PI * 2); g.fill();
+  g.fillStyle = "#ffffff";
+  g.beginPath(); g.arc(c, c, 2.8, 0, Math.PI * 2); g.fill();
+  _markerTex = new THREE.CanvasTexture(cv);
+  _markerTex.colorSpace = THREE.SRGBColorSpace;
+  return _markerTex;
+}
+
+function pointMarker(pos, color, px = 26) {
+  const geo = new THREE.BufferGeometry().setFromPoints([pos]);
+  const mat = new THREE.PointsMaterial({
+    color,
+    map: markerTexture(),
+    size: px * renderer.getPixelRatio(),
+    sizeAttenuation: false,
+    transparent: true,
+    depthTest: false,
+    depthWrite: false,
+  });
+  const pts = new THREE.Points(geo, mat);
+  pts.renderOrder = 999;
+  pts.raycast = () => {};          // Marker nie selbst treffen
+  return pts;
+}
+
+function showPendingMarker(hit, color) {
+  clearGroup(previewGroup);
+  const p = S.viewMode === "print" ? hit.print_xyz : hit.model_xyz;
+  previewGroup.add(pointMarker(new THREE.Vector3(...p), color));
+}
+
+// Pfeil A→B, dessen Spitze kurz vor B endet (B bleibt sichtbar).
+function moveArrow(pA, pB, color) {
+  const dir = pB.clone().sub(pA);
+  const len = dir.length();
+  if (len < 0.2) return new THREE.Group();
+  const gap = Math.min(1.5, len * 0.2);
+  const l = len - gap;
+  return new THREE.ArrowHelper(dir.normalize(), pA, l, color, Math.min(4, l * 0.3), Math.min(2.2, l * 0.18));
+}
+
 function buildEnvironment() {
   clearGroup(envGroup);
   axisLabelAnchors.forEach((a) => a.el.remove());
@@ -929,12 +995,17 @@ canvas.addEventListener("pointermove", (ev) => {
     const pB = new THREE.Vector3(...(S.viewMode === "print" ? hit.print_xyz : hit.model_xyz));
 
     if (S.tool === "move" || S.tool === "measure") {
-      const dir = pB.clone().sub(pA);
-      const len = dir.length();
-      if (len > 0.2) {
-        const col = S.tool === "move" ? 0xf59e0b : 0x06b6d4;
-        previewGroup.add(new THREE.ArrowHelper(dir.normalize(), pA, len, col, Math.min(5, len * 0.35), 2.5));
+      const col = S.tool === "move" ? 0xf59e0b : 0x06b6d4;
+      if (S.tool === "move") {
+        previewGroup.add(moveArrow(pA, pB, col));
+      } else {
+        previewGroup.add(new THREE.Line(
+          new THREE.BufferGeometry().setFromPoints([pA, pB]),
+          new THREE.LineBasicMaterial({ color: col })
+        ));
       }
+      previewGroup.add(pointMarker(pA, col));
+      previewGroup.add(pointMarker(pB, S.tool === "move" ? 0x10b981 : col));
     } else if (S.tool === "box") {
       const partMaxZ = S.partBounds ? S.partBounds.max.z : 15;
       const z0 = Math.min(pA.z, pB.z, 0);
@@ -976,6 +1047,7 @@ canvas.addEventListener("pointerup", (ev) => {
   } else if (S.tool === "move") {
     if (!S.pendingPoint) {
       S.pendingPoint = hit;
+      showPendingMarker(hit, 0xf59e0b);
       showToast("Startpunkt gesetzt – klicke jetzt auf die gewünschte Zielposition.");
     } else {
       const start = S.pendingPoint;
@@ -1042,6 +1114,7 @@ canvas.addEventListener("pointerup", (ev) => {
   } else if (S.tool === "measure") {
     if (!S.pendingPoint) {
       S.pendingPoint = hit;
+      showPendingMarker(hit, 0x06b6d4);
       showToast("Messpunkt A gesetzt – klicke Punkt B.");
     } else {
       const a = S.pendingPoint;
@@ -1079,38 +1152,16 @@ function rebuildAnnotationVisuals() {
       const vPt = new THREE.Vector3(...pt);
       const vN = new THREE.Vector3(...nrm).normalize();
 
-      const sphere = new THREE.Mesh(
-        new THREE.SphereGeometry(1.7, 20, 20),
-        new THREE.MeshBasicMaterial({ color: 0xef4444 })
-      );
-      sphere.position.copy(vPt);
-      annotationGroup.add(sphere);
-
-      const arrow = new THREE.ArrowHelper(vN, vPt, 11, 0xef4444, 3.8, 2.2);
+      // Pfeil beginnt knapp über der Fläche, damit der Punkt selbst frei bleibt
+      const arrow = new THREE.ArrowHelper(vN, vPt.clone().addScaledVector(vN, 2.5), 9, 0xef4444, 3.2, 1.8);
       annotationGroup.add(arrow);
+      annotationGroup.add(pointMarker(vPt, 0xef4444));
     } else if (ann.type === "move") {
       const pFrom = new THREE.Vector3(...(S.viewMode === "print" ? ann.from_print_xyz : ann.from_model_xyz));
       const pTo = new THREE.Vector3(...(S.viewMode === "print" ? ann.to_print_xyz : ann.to_model_xyz));
-      const dir = pTo.clone().sub(pFrom);
-      const len = Math.max(dir.length(), 0.5);
-
-      const startDot = new THREE.Mesh(
-        new THREE.SphereGeometry(1.5, 16, 16),
-        new THREE.MeshBasicMaterial({ color: 0xf59e0b })
-      );
-      startDot.position.copy(pFrom);
-      annotationGroup.add(startDot);
-
-      const endRing = new THREE.Mesh(
-        new THREE.SphereGeometry(1.6, 16, 16),
-        new THREE.MeshBasicMaterial({ color: 0x10b981 })
-      );
-      endRing.position.copy(pTo);
-      annotationGroup.add(endRing);
-
-      annotationGroup.add(
-        new THREE.ArrowHelper(dir.normalize(), pFrom, len, 0xf59e0b, Math.min(5, len * 0.35), 2.8)
-      );
+      annotationGroup.add(moveArrow(pFrom, pTo, 0xf59e0b));
+      annotationGroup.add(pointMarker(pFrom, 0xf59e0b));
+      annotationGroup.add(pointMarker(pTo, 0x10b981));
     } else if (ann.type === "box") {
       const b6 = S.viewMode === "print"
         ? (ann.bbox_print || bboxCornersTransform(ann.bbox_model, modelToPrint))
@@ -1143,14 +1194,7 @@ function rebuildAnnotationVisuals() {
     const pB = new THREE.Vector3(...(S.viewMode === "print" ? S.measurement.b_print : S.measurement.b_model));
     const lGeo = new THREE.BufferGeometry().setFromPoints([pA, pB]);
     annotationGroup.add(new THREE.Line(lGeo, new THREE.LineBasicMaterial({ color: 0x06b6d4 })));
-    for (const p of [pA, pB]) {
-      const dot = new THREE.Mesh(
-        new THREE.SphereGeometry(1.3, 14, 14),
-        new THREE.MeshBasicMaterial({ color: 0x06b6d4 })
-      );
-      dot.position.copy(p);
-      annotationGroup.add(dot);
-    }
+    for (const p of [pA, pB]) annotationGroup.add(pointMarker(p, 0x06b6d4));
   }
 
   syncHtmlLabels();
@@ -1174,7 +1218,7 @@ function syncHtmlLabels() {
       el.textContent = `#${ann.id} Δ(${fmtVec(ann.delta_model_mm)}) mm`;
       const p1 = new THREE.Vector3(...(S.viewMode === "print" ? ann.from_print_xyz : ann.from_model_xyz));
       const p2 = new THREE.Vector3(...(S.viewMode === "print" ? ann.to_print_xyz : ann.to_model_xyz));
-      anchor = p1.add(p2).multiplyScalar(0.5).add(new THREE.Vector3(0, 0, 4));
+      anchor = p1.add(p2).multiplyScalar(0.5);
     } else if (ann.type === "box") {
       el.className = "label-3d box";
       el.textContent = `#${ann.id} Bereich`;

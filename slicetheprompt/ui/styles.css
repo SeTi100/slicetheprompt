@@ -544,6 +544,13 @@ button {
   border: 1px solid #cffafe;
 }
 
+/* Labels von Strecken über die Linie heben, damit sie die Punkt-Marker nicht verdecken */
+.label-3d.move,
+.label-3d.measure {
+  transform: translate(-50%, calc(-100% - 14px));
+  opacity: 0.92;
+}
+
 .label-3d.feature {
   background: rgba(18, 24, 34, 0.85);
   color: #93c5fd;
