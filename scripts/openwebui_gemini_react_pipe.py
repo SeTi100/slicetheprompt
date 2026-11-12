@@ -36,8 +36,8 @@ Wenn der Nutzer ein Teil anfordert:
    checks = {"Breite": (bb.size.X, 20.0, 0.05)}
    ```
 2. Rufe direkt `project_new(name="...", material="pla", code="...")` auf.
-3. Tritt beim Bauen oder Prüfen ein Fehler auf, analysiere die Fehlermeldung, korrigiere den Code und rufe `build_and_check(project="...", code="...")` bzw. `project_new` erneut auf.
-4. Berichte am Ende wahrheitsgetreu über Maße, bestandene Checks sowie Warnungen und verweise auf das 3D-Studio (http://127.0.0.1:8765).
+3. WICHTIGE STOPP-REGEL: Sobald `project_new` oder `build_and_check` `stage="done"` und `report.passed=True` zurückgibt, bist du FERTIG! Rufe KEINE weiteren Tools auf (kein `render_views`, kein `check_report`, kein `cfs_status`, kein `slice`), sondern antworte sofort dem Nutzer mit den Maßen, Checks und dem Link zum 3D-Studio (http://127.0.0.1:8765).
+4. NUR wenn `ok=False` oder `report.passed=False` (echter Fehler) zurückkommt, analysiere den Fehler, korrigiere den Code und rufe `build_and_check(project="...", code="...")` auf.
 """
 
 
@@ -495,9 +495,11 @@ class Pipe:
                 if self._is_tool_error(res):
                     consecutive_errors += 1
                     last_error_msg = json.dumps(res, ensure_ascii=False, default=str)[:500]
+                    await self._emit(__event_emitter__, f"Schritt {iteration}: `{fn_name}` → Fehler, analysiere…")
                 else:
                     consecutive_errors = 0
                     last_error_msg = ""
+                    await self._emit(__event_emitter__, f"Schritt {iteration}: `{fn_name}` → OK")
 
                 function_results.append({
                     "type": "function_result",
