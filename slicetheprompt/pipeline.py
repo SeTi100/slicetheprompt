@@ -88,7 +88,7 @@ def body_slug(name: str) -> str:
     return slugify(name).replace("-", "_") or "koerper"
 
 
-def new_project(name: str, material: str = "pla", beschreibung: str = "") -> dict:
+def new_project(name: str, material: str = "pla", beschreibung: str = "", code: str = "") -> dict:
     cfg = load_config()
     material_cfg(cfg, material)  # validiert
     slug = slugify(name)
@@ -99,10 +99,24 @@ def new_project(name: str, material: str = "pla", beschreibung: str = "") -> dic
     (d / "spec.yaml").write_text(
         SPEC_TEMPLATE.format(name=slug, beschreibung=beschreibung.replace('"', "'"), material=material.lower()),
         encoding="utf-8", newline="\n")
-    (d / "model.py").write_text(
-        MODEL_TEMPLATE.format(name=slug, beschreibung=beschreibung or name, material=material.lower()),
-        encoding="utf-8", newline="\n")
+    if code and code.strip():
+        (d / "model.py").write_text(code, encoding="utf-8", newline="\n")
+    else:
+        (d / "model.py").write_text(
+            MODEL_TEMPLATE.format(name=slug, beschreibung=beschreibung or name, material=material.lower()),
+            encoding="utf-8", newline="\n")
     return {"project": d.name, "path": str(d), "spec": str(d / "spec.yaml"), "model": str(d / "model.py")}
+
+
+def write_model(project: str, code: str, spec: dict | None = None) -> dict:
+    """Schreibt Python-Code nach model.py und aktualisiert optional spec.yaml."""
+    d = project_dir(project)
+    (d / "model.py").write_text(code, encoding="utf-8", newline="\n")
+    if spec and isinstance(spec, dict):
+        sp = load_spec(d)
+        sp.update(spec)
+        write_yaml(d / "spec.yaml", sp)
+    return {"ok": True, "project": d.name, "model": str(d / "model.py"), "bytes": len(code)}
 
 
 def load_spec(d: Path) -> dict:
@@ -444,8 +458,9 @@ def find_assemblies_for_part(part_project: str) -> list[str]:
 def run_all(project: str, orientation: str | None = None, reason: str = "build_and_check",
             also_assembly: str = "auto", clear_feedback: bool = True,
             params: dict[str, float | int] | None = None,
-            spec_updates: dict | None = None) -> dict:
-    """Bauen, (optional) Parameter/Spec vorab setzen, Lage wählen, prüfen, rendern – ein Durchlauf.
+            spec_updates: dict | None = None,
+            code: str | None = None) -> dict:
+    """Bauen, (optional) Parameter/Spec/Code vorab setzen, Lage wählen, prüfen, rendern – ein Durchlauf.
     Bei Erfolg (`passed=True`): Baugruppen automatisch mitbauen (`also_assembly='auto'`) und UI-Feedback löschen."""
     from .assembly import build_assembly, is_assembly
     from .config import write_yaml
@@ -456,6 +471,8 @@ def run_all(project: str, orientation: str | None = None, reason: str = "build_a
             from .ui_server import clear_project_feedback
             res["feedback_cleared"] = clear_project_feedback(d)
         return res
+    if code and code.strip():
+        (d / "model.py").write_text(code, encoding="utf-8", newline="\n")
     if params:
         from . import params as params_mod
         params_mod.update_params(d / "model.py", params)

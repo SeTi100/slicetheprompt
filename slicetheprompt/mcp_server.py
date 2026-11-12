@@ -109,10 +109,18 @@ def _worker(name: str, *args) -> dict:
 
 
 @server.tool()
-def project_new(name: str, material: str = "pla", description: str = "") -> dict:
+def project_new(name: str, material: str = "pla", description: str = "", code: str = "") -> dict:
     """Neues Projekt unter projects/<datum>-<name>/ mit Vorlagen spec.yaml und model.py anlegen.
-    material: 'pla' oder 'petg'. Danach spec.yaml und model.py mit dem Edit/Write-Tool ausfüllen."""
-    return _safe(pipeline.new_project, name, material, description)
+    material: 'pla' oder 'petg'. Optional kann direkt der vollständige Python-Code für model.py
+    übergeben werden. Danach spec.yaml und model.py mit model_write oder dem Edit/Write-Tool anpassen."""
+    return _safe(pipeline.new_project, name, material, description, code)
+
+
+@server.tool()
+def model_write(project: str, code: str, spec: dict | None = None) -> dict:
+    """Schreibt Python-Code (build123d) direkt in projects/<projekt>/model.py und aktualisiert optional spec.yaml.
+    Besonders nützlich für LLM-Clients ohne eigenes Dateisystem-Werkzeug (z. B. Open WebUI)."""
+    return _safe(pipeline.write_model, project, code, spec)
 
 
 @server.tool()
@@ -125,13 +133,14 @@ def project_list() -> dict:
 def build_and_check(project: str, orientation: str = "wie modelliert",
                     also_assembly: str = "auto", clear_feedback: bool = True,
                     params: dict[str, float] | None = None,
-                    spec: dict | None = None) -> dict:
-    """Optional `params` ({"NAME": Wert}) in model.py und `spec` in spec.yaml setzen, dann model.py
+                    spec: dict | None = None,
+                    code: str | None = None) -> dict:
+    """Optional `code` (vollständiger Python-Code für model.py), `params` ({"NAME": Wert}) in model.py und `spec` in spec.yaml setzen, dann model.py
     ausführen (build123d), STEP+STL exportieren, gegen printer.yaml und spec.yaml prüfen und out/render.png erzeugen.
     Bei passed=True werden automatisch alle Baugruppen mitgebaut, die das Teil enthalten (also_assembly='auto',
     abschaltbar mit 'none'), und erledigtes 3D-UI-Feedback gelöscht (clear_feedback=True).
     Danach IMMER das PNG mit dem Read-Tool ansehen."""
-    return _worker("run_all", project, orientation, "build_and_check", also_assembly, clear_feedback, params, spec)
+    return _worker("run_all", project, orientation, "build_and_check", also_assembly, clear_feedback, params, spec, code)
 
 
 @server.tool()
