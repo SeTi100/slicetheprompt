@@ -114,8 +114,16 @@ def project_new(name: str, material: str = "pla", description: str = "", code: s
                 build: bool | None = None, orientation: str = "wie modelliert", overwrite: bool = True) -> dict:
     """Neues Projekt unter projects/<datum>-<name>/ anlegen und optional direkt bauen.
     material: 'pla' oder 'petg'.
-    code: Vollständiger Python-Code (build123d) für model.py. Wenn übergeben, wird das Projekt standardmässig
-    direkt in einem Schritt gebaut, geprüft und gerendert (ideal für autonome LLM-Harnesses).
+    code: Vollständiger Python-Code (build123d) für model.py. MUSS die Variable `part` (einfarbig)
+    oder `bodies` (dict für mehrfarbig) definieren. Beispiel:
+      from build123d import *
+      from lib.parts import *
+      set_material("pla")
+      C = (Align.CENTER, Align.CENTER, Align.MIN)
+      part = Box(20, 20, 20, align=C)
+      part = bottom_chamfer(part)
+      bb = part.bounding_box()
+      checks = {"Breite": (bb.size.X, 20.0, 0.05)}
     build: True führt sofort Bauen, Prüfen und Rendern aus. Bei übergebenem `code` standardmässig True.
     orientation: 'wie modelliert' oder 'auto' oder Ausrichtungsname.
     overwrite: True (Standard) überschreibt ein bestehendes Projekt mit demselben Namen."""

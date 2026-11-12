@@ -34,6 +34,29 @@ def _unwrap(p):
     return p
 
 
+def _find_part(ns: dict):
+    """Findet `part` oder fällt auf den letzten BuildPart/Shape im Namespace zurück."""
+    p = ns.get("part")
+    if p is not None:
+        return p
+    from build123d import BuildPart, Shape
+    for key in ("p", "builder", "result", "model", "solid", "obj", "teil", "cube", "box"):
+        cand = ns.get(key)
+        if cand is not None and not isinstance(cand, type) and (
+            isinstance(cand, (BuildPart, Shape)) or hasattr(cand, "part")
+        ):
+            return cand
+    for key in reversed(list(ns.keys())):
+        if key.startswith("_"):
+            continue
+        cand = ns[key]
+        if isinstance(cand, type):
+            continue
+        if isinstance(cand, BuildPart) or (isinstance(cand, Shape) and hasattr(cand, "volume")):
+            return cand
+    return None
+
+
 def _relocate_features(features: list[dict], final_shape) -> None:
     """Verschiebt Features an ihre Lage im fertigen Teil.
 
@@ -114,7 +137,7 @@ def main() -> int:
                 bodies[str(name)] = _unwrap(shape)
             part = Compound(children=list(bodies.values()))
         else:
-            part = ns.get("part")
+            part = _find_part(ns)
             if part is None:
                 raise RuntimeError("model.py muss 'part' (einfarbig) oder 'bodies' (mehrfarbig) definieren")
             part = _unwrap(part)
