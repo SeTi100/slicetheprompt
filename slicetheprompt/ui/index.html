@@ -2,7 +2,7 @@
 <html lang="de">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>SliceThePrompt – 3D Inspektion, Markierung &amp; Versionierung</title>
   <link rel="stylesheet" href="/styles.css" />
   <script type="importmap">
@@ -13,8 +13,13 @@
     }
   </script>
 </head>
-<body>
+<body data-mobile-view="viewport">
   <div id="app-shell">
+    <nav id="mobile-nav" aria-label="Mobile Navigation">
+      <button type="button" class="mnav-btn active" data-mobile-view="viewport">◈ 3D</button>
+      <button type="button" class="mnav-btn" data-mobile-view="left">📁 Projekt</button>
+      <button type="button" class="mnav-btn" data-mobile-view="right">🔍 Diagnose</button>
+    </nav>
     <!-- ==================== LEFT SIDEBAR: PROJEKTE & VERSIONEN ==================== -->
     <aside id="left-sidebar" class="panel">
       <div class="brand-bar">

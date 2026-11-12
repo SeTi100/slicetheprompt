@@ -3796,10 +3796,27 @@ function animate() {
   updateLabelPositions();
 }
 
+function bindMobileNav() {
+  const nav = document.getElementById("mobile-nav");
+  if (!nav) return;
+  const btns = [...nav.querySelectorAll(".mnav-btn")];
+  for (const btn of btns) {
+    btn.addEventListener("click", () => {
+      const view = btn.dataset.mobileView || "viewport";
+      document.body.dataset.mobileView = view;
+      for (const b of btns) b.classList.toggle("active", b === btn);
+      if (view === "viewport") {
+        requestAnimationFrame(handleResize);
+      }
+    });
+  }
+}
+
 // Boot Studio
 (async function init() {
   handleResize();
   bindEvents();
+  bindMobileNav();
   bindImportDrop();
   animate();
   await loadProjectsList();

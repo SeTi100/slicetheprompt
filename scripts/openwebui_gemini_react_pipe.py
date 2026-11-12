@@ -9,10 +9,12 @@ description: Multi-Turn ReAct Agent Pipe für Open WebUI mit Google GenAI SDK (>
 from __future__ import annotations
 
 import asyncio
+import datetime as dt
 import hashlib
 import json
 import os
 import time
+from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 import httpx
@@ -82,6 +84,24 @@ class Pipe:
         EMIT_STATUS: bool = Field(
             default=True,
             description="Zeigt Live-Statusmeldungen der ReAct-Schritte im Chat an.",
+        )
+        APPEND_USAGE_FOOTER: bool = Field(
+            default=True,
+            description="Hängt am Ende jeder Antwort eine kompakte Token- & Kosten-Zusammenfassung an.",
+        )
+        TOKEN_LOG_PATH: str = Field(
+            default="/root/slicetheprompt/out/token_usage.jsonl",
+            description="Pfad zur JSONL-Logdatei für kumuliertes Token-Tracking (leer = kein Dateilog).",
+        )
+        INPUT_PRICE_PER_1M_USD: float = Field(
+            default=0.30,
+            ge=0.0,
+            description="Geschätzter Preis je 1 Mio. Input-Tokens in USD.",
+        )
+        OUTPUT_PRICE_PER_1M_USD: float = Field(
+            default=2.50,
+            ge=0.0,
+            description="Geschätzter Preis je 1 Mio. Output-Tokens in USD.",
         )
 
     def __init__(self) -> None:
@@ -287,6 +307,75 @@ class Pipe:
                 raise
 
     @staticmethod
+    def _extract_usage(interaction: Any) -> dict[str, int]:
+        """Liest Token-Metriken sicher aus einem Interaction-Objekt (verschiedene SDK-Feldnamen)."""
+        u = getattr(interaction, "usage", None)
+        if u is None:
+            return {"input_tokens": 0, "output_tokens": 0, "thought_tokens": 0, "total_tokens": 0}
+
+        def _get(obj: Any, *keys: str) -> int:
+            for k in keys:
+                val = obj.get(k) if isinstance(obj, dict) else getattr(obj, k, None)
+                if val is not None:
+                    try:
+                        return int(val)
+                    except (TypeError, ValueError):
+                        pass
+            return 0
+
+        inp = _get(u, "input_tokens", "total_input_tokens", "prompt_tokens", "prompt_token_count")
+        out = _get(u, "output_tokens", "total_output_tokens", "completion_tokens", "candidates_token_count")
+        thought = _get(u, "thought_tokens", "total_thought_tokens", "reasoning_tokens", "thoughts_token_count")
+        tot = _get(u, "total_tokens", "total_token_count") or (inp + out + thought)
+        return {"input_tokens": inp, "output_tokens": out, "thought_tokens": thought, "total_tokens": tot}
+
+    def _estimate_cost_usd(self, usage: dict[str, int]) -> float:
+        return (
+            (usage["input_tokens"] / 1_000_000.0) * self.valves.INPUT_PRICE_PER_1M_USD
+            + ((usage["output_tokens"] + usage["thought_tokens"]) / 1_000_000.0) * self.valves.OUTPUT_PRICE_PER_1M_USD
+        )
+
+    def _format_usage_line(self, usage: dict[str, int], steps: int, duration_s: float) -> str:
+        tot = usage["total_tokens"]
+        if tot <= 0:
+            return ""
+        cost = self._estimate_cost_usd(usage)
+        thought_part = f" · Thought: {usage['thought_tokens']:,}" if usage["thought_tokens"] > 0 else ""
+        return (
+            f"📊 Tokens: {tot:,} (In: {usage['input_tokens']:,} · Out: {usage['output_tokens']:,}"
+            f"{thought_part} · {steps} Schritte · {duration_s:.1f}s · ~${cost:.4f})"
+        ).replace(",", ".")
+
+    def _log_usage(
+        self,
+        usage: dict[str, int],
+        steps: int,
+        duration_s: float,
+        status: str,
+        user: dict[str, Any] | None,
+    ) -> None:
+        log_path = (self.valves.TOKEN_LOG_PATH or "").strip()
+        if not log_path:
+            return
+        try:
+            p = Path(log_path)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            entry = {
+                "ts": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
+                "user": (user or {}).get("email") or (user or {}).get("name") or "unknown",
+                "model": self.valves.GEMINI_MODEL,
+                "steps": steps,
+                "status": status,
+                "duration_s": round(duration_s, 2),
+                **usage,
+                "cost_usd": round(self._estimate_cost_usd(usage), 6),
+            }
+            with p.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        except Exception:
+            pass
+
+    @staticmethod
     def _is_tool_error(res: Any) -> bool:
         if isinstance(res, dict):
             if res.get("ok") is False or res.get("isError") is True:
@@ -325,13 +414,26 @@ class Pipe:
                 await self._emit(__event_emitter__, f"MCP-Verbindung fehlgeschlagen: {exc}", done=True)
                 return f"❌ Konnte keine Werkzeuge laden (__tools__ leer und MCP unter `{self.valves.MCP_URL}` nicht erreichbar: {exc})."
 
+        t_start = time.monotonic()
+        total_usage = {"input_tokens": 0, "output_tokens": 0, "thought_tokens": 0, "total_tokens": 0}
         seen_calls: set[str] = set()
         consecutive_errors = 0
         previous_interaction_id: str | None = None
         next_input: Any = user_input
         last_error_msg = ""
+        steps_run = 0
+
+        async def _finish(text: str, status_label: str, status_code: str) -> str:
+            dur = time.monotonic() - t_start
+            self._log_usage(total_usage, steps_run, dur, status_code, __user__)
+            line = self._format_usage_line(total_usage, steps_run, dur)
+            await self._emit(__event_emitter__, f"{status_label}{(' · ' + line) if line else ''}", done=True)
+            if self.valves.APPEND_USAGE_FOOTER and line:
+                return f"{text}\n\n---\n{line}"
+            return text
 
         for iteration in range(1, self.valves.MAX_ITERATIONS + 1):
+            steps_run = iteration
             if iteration > 1 and self.valves.MIN_DELAY_SECONDS > 0:
                 await asyncio.sleep(self.valves.MIN_DELAY_SECONDS)
 
@@ -349,16 +451,19 @@ class Pipe:
             try:
                 interaction = await self._create_interaction_with_backoff(client, **req_kwargs)
             except Exception as exc:
-                await self._emit(__event_emitter__, f"API-Fehler: {exc}", done=True)
-                return f"❌ Gemini API Fehler in Schritt {iteration}: {exc}"
+                return await _finish(f"❌ Gemini API Fehler in Schritt {iteration}: {exc}", f"API-Fehler: {exc}", "api_error")
+
+            turn_usage = self._extract_usage(interaction)
+            for k in total_usage:
+                total_usage[k] += turn_usage[k]
 
             previous_interaction_id = getattr(interaction, "id", None)
             steps = getattr(interaction, "steps", None) or []
             function_calls = [s for s in steps if getattr(s, "type", None) == "function_call"]
 
             if not function_calls:
-                await self._emit(__event_emitter__, "Fertig.", done=True)
-                return getattr(interaction, "output_text", None) or "✅ Aufgabe abgeschlossen (keine Textausgabe vom Modell)."
+                out_text = getattr(interaction, "output_text", None) or "✅ Aufgabe abgeschlossen (keine Textausgabe vom Modell)."
+                return await _finish(out_text, "Fertig", "ok")
 
             function_results: list[dict[str, Any]] = []
             for call in function_calls:
@@ -368,10 +473,11 @@ class Pipe:
 
                 sig = hashlib.sha1(f"{fn_name}:{json.dumps(fn_args, sort_keys=True, default=str)}".encode()).hexdigest()
                 if sig in seen_calls:
-                    await self._emit(__event_emitter__, "Abbruch: Identischer Tool-Aufruf wiederholt.", done=True)
-                    return (
+                    return await _finish(
                         f"⚠️ ReAct-Failsafe ausgelöst: Das Modell wollte `{fn_name}` mit identischen Argumenten "
-                        f"erneut aufrufen. Letzter Fehler: {last_error_msg or 'keiner'}"
+                        f"erneut aufrufen. Letzter Fehler: {last_error_msg or 'keiner'}",
+                        "Abbruch: Identischer Tool-Aufruf wiederholt",
+                        "duplicate_call",
                     )
                 seen_calls.add(sig)
 
@@ -401,16 +507,18 @@ class Pipe:
                 })
 
             if consecutive_errors >= self.valves.MAX_CONSECUTIVE_ERRORS:
-                await self._emit(__event_emitter__, "Abbruch: Zu viele Fehler in Folge.", done=True)
-                return (
+                return await _finish(
                     f"⚠️ ReAct-Circuit-Breaker ausgelöst: {consecutive_errors} Tool-Fehler in Folge.\n"
-                    f"Letzte Rückmeldung: ```json\n{last_error_msg}\n```"
+                    f"Letzte Rückmeldung: ```json\n{last_error_msg}\n```",
+                    "Abbruch: Zu viele Fehler in Folge",
+                    "circuit_breaker",
                 )
 
             next_input = function_results
 
-        await self._emit(__event_emitter__, "Maximale Schrittzahl erreicht.", done=True)
-        return (
+        return await _finish(
             f"⚠️ ReAct-Failsafe: Maximale Anzahl von {self.valves.MAX_ITERATIONS} Schritten erreicht, "
-            f"ohne dass das Modell eine finale Antwort abgeschlossen hat. Letzter Fehler: {last_error_msg or 'keiner'}"
+            f"ohne dass das Modell eine finale Antwort abgeschlossen hat. Letzter Fehler: {last_error_msg or 'keiner'}",
+            "Maximale Schrittzahl erreicht",
+            "max_iterations",
         )

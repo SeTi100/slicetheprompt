@@ -1260,3 +1260,166 @@ button {
 .wt-row .num { text-align: right; font-family: var(--mono); }
 .wt-bar { height: 6px; background: var(--bg-hover); border-radius: 3px; overflow: hidden; }
 .wt-bar > span { display: block; height: 100%; }
+
+/* ==================== MOBILE OPTIMIERUNG ==================== */
+#mobile-nav {
+  display: none;
+}
+
+#three-canvas {
+  touch-action: none;
+}
+
+@media (pointer: coarse) {
+  #cursor-readout {
+    display: none !important;
+  }
+}
+
+@media (max-width: 900px) {
+  #app-shell {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    height: 100dvh;
+    width: 100vw;
+  }
+
+  #mobile-nav {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+    padding: calc(6px + env(safe-area-inset-top, 0px)) 8px 6px;
+    background: var(--bg-panel);
+    border-bottom: 1px solid var(--border);
+    z-index: 30;
+  }
+
+  .mnav-btn {
+    appearance: none;
+    border: 1px solid var(--border);
+    background: var(--bg-elevated);
+    color: var(--text-muted);
+    font-family: var(--sans);
+    font-size: 13px;
+    font-weight: 600;
+    border-radius: 8px;
+    min-height: 38px;
+    padding: 6px 8px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+  }
+
+  .mnav-btn.active {
+    background: rgba(56, 189, 248, 0.18);
+    color: var(--accent);
+    border-color: var(--accent);
+  }
+
+  body[data-mobile-view="viewport"] #left-sidebar,
+  body[data-mobile-view="viewport"] #right-sidebar {
+    display: none;
+  }
+
+  body[data-mobile-view="left"] #viewport-area,
+  body[data-mobile-view="left"] #right-sidebar {
+    display: none;
+  }
+
+  body[data-mobile-view="right"] #viewport-area,
+  body[data-mobile-view="right"] #left-sidebar {
+    display: none;
+  }
+
+  #left-sidebar,
+  #right-sidebar {
+    border: none;
+    width: 100%;
+    height: 100%;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  #viewport-toolbar {
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    gap: 6px;
+    padding: 6px 8px;
+  }
+
+  #viewport-toolbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  #viewport-toolbar .tool-group,
+  #viewport-toolbar .clip-group {
+    flex-shrink: 0;
+  }
+
+  .tool-key {
+    display: none;
+  }
+
+  .tool-btn,
+  .seg-btn,
+  .toggle-pill,
+  .select-input,
+  .select-xs,
+  .btn-primary,
+  .btn-secondary {
+    min-height: 36px;
+    font-size: 13px;
+  }
+
+  .tool-btn,
+  .seg-btn,
+  .toggle-pill {
+    white-space: nowrap;
+    padding: 6px 10px;
+  }
+
+  #cam-bar {
+    left: 8px;
+    right: 8px;
+    bottom: 8px;
+    transform: none;
+    max-width: calc(100vw - 16px);
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding: 4px;
+  }
+
+  #cam-bar::-webkit-scrollbar {
+    display: none;
+  }
+
+  #cam-bar button {
+    flex-shrink: 0;
+    min-height: 32px;
+    padding: 4px 10px;
+  }
+
+  #scene-legend {
+    display: none;
+  }
+
+  #status-bar {
+    padding: 4px 10px calc(4px + env(safe-area-inset-bottom, 0px));
+    font-size: 11px;
+  }
+
+  #cfs-slots-bar,
+  #status-bar .status-right {
+    display: none;
+  }
+
+  .modal-card {
+    width: calc(100vw - 16px);
+    max-height: 88dvh;
+  }
+}

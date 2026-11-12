@@ -36,8 +36,8 @@ def _step(step_type: str, **kwargs):
     return types.SimpleNamespace(type=step_type, **kwargs)
 
 
-def _interaction(iid: str, steps=None, output_text: str | None = None):
-    return types.SimpleNamespace(id=iid, steps=steps or [], output_text=output_text)
+def _interaction(iid: str, steps=None, output_text: str | None = None, usage=None):
+    return types.SimpleNamespace(id=iid, steps=steps or [], output_text=output_text, usage=usage)
 
 
 class TestOpenWebUIReactPipe(unittest.TestCase):
@@ -203,6 +203,57 @@ class TestOpenWebUIReactPipe(unittest.TestCase):
 
         self.assertEqual(out, "Erfolg nach Retry")
         self.assertEqual(attempts["n"], 2)
+
+    def test_token_usage_tracking_and_jsonl_log(self):
+        import json
+        import tempfile
+
+        mod = _load_pipe_module()
+        pipe = mod.Pipe()
+        pipe.valves.GEMINI_API_KEY = "test-key"
+        pipe.valves.MIN_DELAY_SECONDS = 0.0
+
+        with tempfile.TemporaryDirectory() as td:
+            log_file = Path(td) / "tokens.jsonl"
+            pipe.valves.TOKEN_LOG_PATH = str(log_file)
+
+            interactions = [
+                _interaction(
+                    "int-1",
+                    steps=[_step("function_call", id="c1", name="project_new", arguments={"name": "box"})],
+                    usage={"input_tokens": 1000, "output_tokens": 150, "thought_tokens": 50},
+                ),
+                _interaction(
+                    "int-2",
+                    steps=[],
+                    output_text="Fertig.",
+                    usage={"input_tokens": 1200, "output_tokens": 100, "thought_tokens": 0},
+                ),
+            ]
+
+            class FakeInteractions:
+                def create(self, **kwargs):
+                    return interactions.pop(0)
+
+            async def fake_tool(**kwargs):
+                return {"ok": True}
+
+            tools = {"project_new": {"callable": fake_tool, "spec": {"name": "project_new", "parameters": {"type": "object", "properties": {}}}}}
+            with patch.object(mod.genai, "Client", return_value=types.SimpleNamespace(interactions=FakeInteractions())):
+                out = asyncio.run(pipe.pipe({"messages": [{"role": "user", "content": "Box"}]}, __user__={"name": "tester"}, __tools__=tools))
+
+            self.assertIn("Tokens: 2.500", out)
+            self.assertIn("In: 2.200", out)
+            self.assertIn("Out: 250", out)
+            self.assertIn("Thought: 50", out)
+            self.assertTrue(log_file.exists())
+            rec = json.loads(log_file.read_text(encoding="utf-8").strip())
+            self.assertEqual(rec["total_tokens"], 2500)
+            self.assertEqual(rec["input_tokens"], 2200)
+            self.assertEqual(rec["output_tokens"], 250)
+            self.assertEqual(rec["thought_tokens"], 50)
+            self.assertEqual(rec["steps"], 2)
+            self.assertEqual(rec["status"], "ok")
 
 
 if __name__ == "__main__":
