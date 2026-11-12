@@ -28,6 +28,7 @@ def _funcs() -> dict:
         "replace_in_mesh": mesh_edit.replace_in_mesh,
         "prepare_import": mesh_edit.prepare_import,
         "write_model": pipeline.write_model,
+        "new_project": pipeline.new_project,
     }
 
 

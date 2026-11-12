@@ -27,7 +27,8 @@ from .moonraker import Moonraker
 
 INSTRUCTIONS = """\
 slicetheprompt erzeugt druckfertige Teile für den Creality Hi Combo (0,4-mm-Düse, PLA/PETG).
-Ablauf: project_new → spec.yaml und model.py schreiben → build_and_check → Render ansehen →
+Ablauf: project_new(name, material, code=...) baut, prüft und rendert in EINEM Schritt. Alternativ:
+project_new → spec.yaml und model.py schreiben/anpassen (model_write) → build_and_check → Render ansehen →
 cfs_status/filament_plan → slice → Nutzer bestätigt mit 'drucken' → upload_and_print(token).
 Mehrfarbig: in model.py `bodies = {name: Körper}`, Spule je Körper in spec.yaml → filament.
 Baugruppe (mehrere Teil-Projekte zusammen ansehen/prüfen): assembly_new → assembly.py → build_assembly.
@@ -109,11 +110,19 @@ def _worker(name: str, *args) -> dict:
 
 
 @server.tool()
-def project_new(name: str, material: str = "pla", description: str = "", code: str = "") -> dict:
-    """Neues Projekt unter projects/<datum>-<name>/ mit Vorlagen spec.yaml und model.py anlegen.
-    material: 'pla' oder 'petg'. Optional kann direkt der vollständige Python-Code für model.py
-    übergeben werden. Danach spec.yaml und model.py mit model_write oder dem Edit/Write-Tool anpassen."""
-    return _safe(pipeline.new_project, name, material, description, code)
+def project_new(name: str, material: str = "pla", description: str = "", code: str = "",
+                build: bool | None = None, orientation: str = "wie modelliert", overwrite: bool = True) -> dict:
+    """Neues Projekt unter projects/<datum>-<name>/ anlegen und optional direkt bauen.
+    material: 'pla' oder 'petg'.
+    code: Vollständiger Python-Code (build123d) für model.py. Wenn übergeben, wird das Projekt standardmässig
+    direkt in einem Schritt gebaut, geprüft und gerendert (ideal für autonome LLM-Harnesses).
+    build: True führt sofort Bauen, Prüfen und Rendern aus. Bei übergebenem `code` standardmässig True.
+    orientation: 'wie modelliert' oder 'auto' oder Ausrichtungsname.
+    overwrite: True (Standard) überschreibt ein bestehendes Projekt mit demselben Namen."""
+    should_build = bool(code and code.strip()) if build is None else bool(build)
+    if should_build:
+        return _worker("new_project", name, material, description, code, overwrite, True, orientation)
+    return _safe(pipeline.new_project, name, material, description, code, overwrite, False, orientation)
 
 
 @server.tool()

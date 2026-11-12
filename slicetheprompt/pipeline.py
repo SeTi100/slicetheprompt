@@ -88,14 +88,15 @@ def body_slug(name: str) -> str:
     return slugify(name).replace("-", "_") or "koerper"
 
 
-def new_project(name: str, material: str = "pla", beschreibung: str = "", code: str = "") -> dict:
+def new_project(name: str, material: str = "pla", beschreibung: str = "", code: str = "",
+                overwrite: bool = True, build: bool = False, orientation: str = "wie modelliert") -> dict:
     cfg = load_config()
     material_cfg(cfg, material)  # validiert
     slug = slugify(name)
     d = PROJECTS_DIR / f"{dt.date.today():%Y-%m-%d}-{slug}"
-    if d.exists():
+    if d.exists() and not overwrite:
         raise FileExistsError(f"Projekt existiert schon: {d}")
-    (d / "out").mkdir(parents=True)
+    (d / "out").mkdir(parents=True, exist_ok=True)
     (d / "spec.yaml").write_text(
         SPEC_TEMPLATE.format(name=slug, beschreibung=beschreibung.replace('"', "'"), material=material.lower()),
         encoding="utf-8", newline="\n")
@@ -105,12 +106,20 @@ def new_project(name: str, material: str = "pla", beschreibung: str = "", code: 
         (d / "model.py").write_text(
             MODEL_TEMPLATE.format(name=slug, beschreibung=beschreibung or name, material=material.lower()),
             encoding="utf-8", newline="\n")
-    return {"project": d.name, "path": str(d), "spec": str(d / "spec.yaml"), "model": str(d / "model.py")}
+    res = {"project": d.name, "path": str(d), "spec": str(d / "spec.yaml"), "model": str(d / "model.py")}
+    if build:
+        b_res = run_all(d.name, orientation=orientation)
+        res.update(b_res)
+    return res
 
 
 def write_model(project: str, code: str, spec: dict | None = None) -> dict:
     """Schreibt Python-Code nach model.py und aktualisiert optional spec.yaml."""
-    d = project_dir(project)
+    try:
+        d = project_dir(project)
+    except FileNotFoundError:
+        p_info = new_project(project, code=code, overwrite=True)
+        d = Path(p_info["path"])
     (d / "model.py").write_text(code, encoding="utf-8", newline="\n")
     if spec and isinstance(spec, dict):
         sp = load_spec(d)
@@ -464,7 +473,14 @@ def run_all(project: str, orientation: str | None = None, reason: str = "build_a
     Bei Erfolg (`passed=True`): Baugruppen automatisch mitbauen (`also_assembly='auto'`) und UI-Feedback löschen."""
     from .assembly import build_assembly, is_assembly
     from .config import write_yaml
-    d = project_dir(project)
+    try:
+        d = project_dir(project)
+    except FileNotFoundError:
+        if code and code.strip():
+            p_info = new_project(project, code=code, overwrite=True)
+            d = Path(p_info["path"])
+        else:
+            raise
     if is_assembly(d) and not (d / "model.py").exists():
         res = {"stage": "baugruppe", **build_assembly(project)}
         if clear_feedback and res.get("ok"):

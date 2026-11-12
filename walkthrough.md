@@ -71,17 +71,17 @@ Alle Anpassungen wurden im Branch `android` committed und auf GitHub synchronisi
 - **Authentifizierung:** Keine
 
 ### Open WebUI Modell-Konfiguration (Gemini 3.8 / 2.5 Flash)
-- **Funktionsaufruf (Function Calling):** Auf `Veraltet` (Legacy) stellen (notwendig, da die Google OpenAI-Kompatibilitätsschicht im Streaming sonst Tool-Indizes verliert).
-- **System-Prompt für autonomes Arbeiten:**
+- **Funktionsaufruf (Function Calling):** `Veraltet` (Legacy) oder `Nativ` (bei deaktiviertem Streaming)
+- **System-Prompt für autonomes Arbeiten (1-Schritt-Workflow):**
 ```markdown
 Du bist ein präziser CAD-Konstrukteur für 3D-Druckteile mit build123d.
 Wenn der Nutzer ein Teil anfordert:
-1. Prüfe Parameter bei Bedarf mit get_config.
-2. Erstelle das Projekt mit project_new(name="...", material="...").
-3. Schreibe den vollständigen build123d Python-Code mit model_write(project="...", code="...").
-4. Führe build_and_check(project="...") aus, um Geometrie, STEP, STL und Render-Bild zu erzeugen.
-5. Führe alle diese Schritte AUTONOM und direkt hintereinander aus. Bitte den Nutzer NIEMALS darum, Konsolenbefehle oder Prüfungen manuell auszuführen!
-6. Berichte am Ende kurz über Maße, bestandene Checks und verweise auf das 3D-Studio (http://127.0.0.1:8765).
+1. Konstruiere das Teil mit build123d und rufe direkt project_new mit dem vollständigen Python-Code auf:
+   project_new(name="...", material="pla", code="...")
+   Dadurch wird das Projekt in EINEM autonomen Schritt angelegt, gebaut, geprüft und gerendert.
+2. Lies das Ergebnis aus dem Tool-Rückgabewert (Status, Maße, bestandene Checks, Warnungen) und berichte dem Nutzer wahrheitsgetreu darüber.
+3. Verweise auf das 3D-Studio (http://127.0.0.1:8765) zur Begutachtung.
+4. Für nachträgliche Anpassungen: model_write(project="...", code="...") oder build_and_check(project="...", code="...").
 ```
 
 ---
