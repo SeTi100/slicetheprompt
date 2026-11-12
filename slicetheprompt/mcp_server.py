@@ -442,9 +442,6 @@ def main() -> None:
         server.run(transport="stdio")
     else:
         print(f"Starte slicetheprompt MCP-Server ({args.transport}) auf http://{args.host}:{args.port}/sse", file=sys.stderr)
-        if hasattr(server, "settings"):
-            server.settings.host = args.host
-            server.settings.port = args.port
         try:
             server.run(transport=args.transport, host=args.host, port=args.port)
         except TypeError:
