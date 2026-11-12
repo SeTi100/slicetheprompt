@@ -37,11 +37,15 @@ cat << 'EOF' > /root/start_all.sh
 #!/bin/bash
 export PATH="/root/.local/bin:/root/.cargo/bin:$PATH"
 export HOME="/root"
+export DATA_DIR="/root/.local/share/uv/tools/open-webui/lib/python3.12/site-packages/open_webui/data"
 
 echo "[1/4] Stoppe alte Instanzen..."
 pkill -f '[s]licetheprompt' 2>/dev/null || true
 pkill -f '[o]pen-webui' 2>/dev/null || true
 sleep 1
+
+# Sicherheitskopie der Datenbank (überschreibt bestehendes Backup nicht)
+cp -n "$DATA_DIR/webui.db" /root/webui_original_backup.db 2>/dev/null || true
 
 echo "[2/4] Starte SliceThePrompt 3D-Studio (Port 8765)..."
 cd /root/slicetheprompt
