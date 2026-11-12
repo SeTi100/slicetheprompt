@@ -53,14 +53,15 @@ nohup uv run slicetheprompt mcp --transport streamable-http --host 127.0.0.1 --p
 echo "[4/4] Starte Open WebUI (Port 8080)..."
 nohup open-webui serve > /tmp/openwebui.log 2>&1 &
 
-sleep 3
 echo "============================================="
-echo " Alle Dienste erfolgreich im Hintergrund aktiv!"
+echo " Alle Dienste aktiv! Halte PRoot-Session offen..."
 echo " 3D-Studio:   http://127.0.0.1:8765"
 echo " MCP-Server:  http://127.0.0.1:8766/mcp"
 echo " Open WebUI:  http://127.0.0.1:8080"
-echo " Logs unter:  /tmp/*.log"
 echo "============================================="
+
+# HÄLT PROOT AM LEBEN (sonst beendet PRoot alle Hintergrunddienste)
+wait
 EOF
 
 chmod +x /root/start_all.sh
