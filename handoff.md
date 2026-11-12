@@ -96,6 +96,11 @@ git reset --hard origin/android
 echo "Aktueller Git-Stand:"
 git log -1 --oneline
 
+# Open WebUI Pipe-JSON für 1-Klick-Import in den Android-Download-Ordner kopieren
+if [ -d /mnt/android_out ] && [ -f /root/slicetheprompt/scripts/openwebui_gemini_react_pipe.json ]; then
+  cp -f /root/slicetheprompt/scripts/openwebui_gemini_react_pipe.json /mnt/android_out/slicetheprompt_react_pipe.json
+fi
+
 echo "=== 2. Dienste mit neuem Code neu starten ==="
 exec /root/start_all.sh
 ```
