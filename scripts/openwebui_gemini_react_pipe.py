@@ -3,8 +3,8 @@ title: SliceThePrompt Gemini ReAct Agent
 author: slicetheprompt
 version: 1.0.0
 description: Multi-Turn ReAct Agent Pipe für Open WebUI mit Google GenAI SDK (>= 2.30.1) und direkter MCP-Anbindung inkl. Failsafes.
-requirements: google-genai>=2.30.1, httpx>=0.27.0, pydantic>=2.0.0
 """
+# Benötigte Pakete im Open WebUI venv: google-genai>=2.30.1, httpx>=0.27.0, pydantic>=2.0.0
 
 from __future__ import annotations
 
