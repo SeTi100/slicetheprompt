@@ -58,7 +58,7 @@ class Pipe:
             description="Fallback-URL zum SliceThePrompt MCP Streamable-HTTP Server, falls Open WebUI keine __tools__ übergibt.",
         )
         MAX_ITERATIONS: int = Field(
-            default=6,
+            default=8,
             ge=1,
             le=15,
             description="Maximale ReAct-Schritte pro Nachricht (Failsafe gegen Endlos-Loops).",
@@ -437,7 +437,7 @@ class Pipe:
             if iteration > 1 and self.valves.MIN_DELAY_SECONDS > 0:
                 await asyncio.sleep(self.valves.MIN_DELAY_SECONDS)
 
-            await self._emit(__event_emitter__, f"ReAct-Schritt {iteration}/{self.valves.MAX_ITERATIONS}: Denke…")
+            await self._emit(__event_emitter__, f"Denkschritt {iteration} (max. {self.valves.MAX_ITERATIONS})…")
 
             req_kwargs: dict[str, Any] = {
                 "model": self.valves.GEMINI_MODEL,
@@ -516,9 +516,24 @@ class Pipe:
 
             next_input = function_results
 
-        return await _finish(
-            f"⚠️ ReAct-Failsafe: Maximale Anzahl von {self.valves.MAX_ITERATIONS} Schritten erreicht, "
-            f"ohne dass das Modell eine finale Antwort abgeschlossen hat. Letzter Fehler: {last_error_msg or 'keiner'}",
-            "Maximale Schrittzahl erreicht",
-            "max_iterations",
-        )
+        # Failsafe erreicht: eine abschliessende Text-Zusammenfassung ohne Tools anfordern
+        try:
+            await self._emit(__event_emitter__, "Schrittlimit erreicht – fasse Ergebnis zusammen…")
+            final_req = {
+                "model": self.valves.GEMINI_MODEL,
+                "input": next_input,
+                "system_instruction": system_instruction + "\n\nFasse den bisherigen Stand knapp und ehrlich zusammen (ohne weitere Tools aufzurufen).",
+            }
+            if previous_interaction_id:
+                final_req["previous_interaction_id"] = previous_interaction_id
+            final_int = await self._create_interaction_with_backoff(client, **final_req)
+            turn_usage = self._extract_usage(final_int)
+            for k in total_usage:
+                total_usage[k] += turn_usage[k]
+            summary = getattr(final_int, "output_text", None) or ""
+        except Exception:
+            summary = ""
+
+        prefix = f"⚠️ Maximale Schrittzahl ({self.valves.MAX_ITERATIONS}) erreicht.\n\n"
+        body_txt = summary or f"Letzter Fehler: {last_error_msg or 'keiner'}"
+        return await _finish(prefix + body_txt, "Maximale Schrittzahl erreicht", "max_iterations")
