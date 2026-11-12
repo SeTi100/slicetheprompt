@@ -667,11 +667,12 @@ def get_printer_readonly_cached(ttl: float = 2.0) -> dict[str, Any]:
     """Rein lesender Moonraker- und CFS-Status mit kurzem In-Memory-Cache."""
     now = time.monotonic()
     with _PRINTER_CACHE_LOCK:
-        if _PRINTER_CACHE["data"] is not None and (now - _PRINTER_CACHE["ts"]) < ttl:
+        if _PRINTER_CACHE["data"] is not None and (now - _PRINTER_CACHE["ts"]) < _PRINTER_CACHE.get("ttl", ttl):
             return _PRINTER_CACHE["data"]
 
+    current_ttl = ttl
     try:
-        m = Moonraker(timeout=1.5)
+        m = Moonraker(timeout=1.0)
         st = m.status()
         cfs = m.cfs()
         res: dict[str, Any] = {
@@ -681,10 +682,12 @@ def get_printer_readonly_cached(ttl: float = 2.0) -> dict[str, Any]:
         }
     except Exception as exc:
         res = {"connected": False, "error": str(exc), "status": None, "cfs": []}
+        current_ttl = 5.0  # Wenn offline, nicht alle 2s neu abfragen und blockieren
 
     with _PRINTER_CACHE_LOCK:
         _PRINTER_CACHE["ts"] = time.monotonic()
         _PRINTER_CACHE["data"] = res
+        _PRINTER_CACHE["ttl"] = current_ttl
     return res
 
 
@@ -790,20 +793,26 @@ class StudioHandler(BaseHTTPRequestHandler):
                 return [_sanitize(v) for v in x]
             return x
         raw = json.dumps(_sanitize(obj), ensure_ascii=False, default=float).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(raw)))
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        self.wfile.write(raw)
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(raw)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(raw)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            pass
 
     def _send_bytes(self, data: bytes, content_type: str, status: int = 200, cache: str = "no-cache") -> None:
-        self.send_response(status)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", cache)
-        self.end_headers()
-        self.wfile.write(data)
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", cache)
+            self.end_headers()
+            self.wfile.write(data)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            pass
 
     def _read_body_json(self) -> dict[str, Any]:
         length = int(self.headers.get("Content-Length", "0") or "0")
@@ -988,6 +997,8 @@ class StudioHandler(BaseHTTPRequestHandler):
 
             self._serve_static(raw_path)
 
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            pass
         except PermissionError as exc:
             self._send_json({"ok": False, "error": str(exc)}, status=403)
         except FileNotFoundError as exc:
@@ -1134,6 +1145,8 @@ class StudioHandler(BaseHTTPRequestHandler):
 
             self._send_json({"ok": False, "error": f"Unbekannte Aktion: {action}"}, status=404)
 
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            pass
         except PermissionError as exc:
             self._send_json({"ok": False, "error": str(exc)}, status=403)
         except FileNotFoundError as exc:
@@ -1157,6 +1170,8 @@ class StudioHandler(BaseHTTPRequestHandler):
                 self._send_json(clear_project_feedback(d))
                 return
             self._send_json({"ok": False, "error": "Unbekannter Pfad"}, status=404)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            pass
         except PermissionError as exc:
             self._send_json({"ok": False, "error": str(exc)}, status=403)
         except FileNotFoundError as exc:
