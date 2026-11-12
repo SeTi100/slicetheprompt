@@ -139,21 +139,28 @@ proot-distro login debian \
 
 ## 5. Open WebUI MCP- & Modell-Konfiguration
 
-1. **MCP-Integration (Admin ➔ Einstellungen ➔ Externe Verbindungen):**
+### A) Externe MCP-Verbindung
+1. **Admin-Bereich ➔ Einstellungen ➔ Externe Verbindungen:**
    - Typ: `MCP (Streamable HTTP)`
    - URL: `http://127.0.0.1:8766/mcp`
-   - Authentifizierung: Keine
-2. **Modell-Einstellungen (z. B. Gemini 3.8 Flash):**
-   - Funktionsaufruf (Function Calling): `Veraltet` (Legacy) oder `Nativ` (sofern Streaming aus ist)
-   - Streaming: Deaktiviert bei Tool-Nutzung
-   - **System-Prompt (für verlässliches 1-Schritt-Bauen ohne Tool-Ketten-Abbruch):**
-     ```markdown
-     Du bist ein präziser CAD-Konstrukteur für 3D-Druckteile mit build123d.
-     Wenn der Nutzer ein Teil anfordert:
-     1. Konstruiere das Teil mit build123d und rufe direkt project_new mit dem vollständigen Python-Code auf:
-        project_new(name="...", material="pla", code="...")
-        Dadurch wird das Projekt in EINEM autonomen Schritt angelegt, gebaut, geprüft und gerendert.
-     2. Lies das Ergebnis aus dem Tool-Rückgabewert (Status, Maße, bestandene Checks, Warnungen) und berichte dem Nutzer wahrheitsgetreu darüber.
-     3. Verweise auf das 3D-Studio (http://127.0.0.1:8765) zur Begutachtung.
-     4. Für nachträgliche Anpassungen: model_write(project="...", code="...") oder build_and_check(project="...", code="...").
-     ```
+   - Klick auf das Prüfsymbol (Häkchen/Verify) ➔ **Speichern**
+
+### B) Modell-Einstellungen (Workspace ➔ Modelle ➔ '3D designer')
+*Wichtig: Einstellungen immer direkt im Modell-Preset speichern, nicht im Chat-Menü 'Steuerung' (dort steht 'Standard' für die Übernahme der Modellwerte).*
+- **Funktionsaufruf (Function Calling):** Zwingend auf **`Veraltet` (Legacy)**!
+  - *Hintergrund:* Da Gemini über die Google OpenAI-Kompatibilitätsschicht angebunden ist, bricht `Nativ` komplett ab (Modell antwortet nur mit eigenem Namen oder bleibt stumm). Im Modus `Veraltet` injiziert Open WebUI die Tools per Prompt-Verfahren – das funktioniert verlässlich.
+  - *Einschränkung von Legacy:* Es wird genau **ein Tool-Aufruf pro Chat-Turn** ausgeführt. Daher muss der 1-Schritt-Workflow genutzt werden.
+- **Streaming:** Deaktiviert.
+- **Valves:** Der Reiter „Valves“ bei Werkzeugen ist nur für interne Python-Plugins gedacht – dass dieser bei externen MCP-Servern leer ist, ist normal.
+- **Werkzeuge:** Haken bei `slicetheprompt` setzen.
+- **System-Prompt (1-Schritt-Workflow):**
+  ```markdown
+  Du bist ein präziser CAD-Konstrukteur für 3D-Druckteile mit build123d.
+  Wenn der Nutzer ein Teil anfordert:
+  1. Konstruiere das Teil mit build123d und rufe direkt project_new mit dem vollständigen Python-Code auf:
+     project_new(name="...", material="pla", code="...")
+     Dadurch wird das Projekt in EINEM autonomen Schritt angelegt, gebaut, geprüft und gerendert.
+  2. Lies das Ergebnis aus dem Tool-Rückgabewert (Status, Maße, bestandene Checks, Warnungen) und berichte dem Nutzer wahrheitsgetreu darüber.
+  3. Verweise auf das 3D-Studio (http://127.0.0.1:8765) zur Begutachtung.
+  4. Für nachträgliche Anpassungen: model_write(project="...", code="...") oder build_and_check(project="...", code="...").
+  ```
