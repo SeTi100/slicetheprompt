@@ -1381,6 +1381,7 @@ button {
   }
 
   #cam-bar {
+    top: auto;
     left: 8px;
     right: 8px;
     bottom: 8px;
