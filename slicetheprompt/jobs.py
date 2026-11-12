@@ -141,6 +141,22 @@ def slice_project(project: str, material: str | None = None, quality: str | None
         res = slice_model(d / "out" / "print.stl", fil_files, quality, filament_ids=[plan[0]["tool"] + 1],
                           outdir=work)
 
+    if res.get("skipped"):
+        return {
+            "status": "skipped",
+            "project": d.name,
+            "quality": quality,
+            "gcode": res.get("gcode"),
+            "filamente": [{"körper": (p["body"] if fp["multicolor"] else None), "spule": p["slot"],
+                           "werkzeug": f"T{p['tool']}", "material": p["type"],
+                           "farbe": f"{p['color_name']} {p['color']}" if p["color"] else None,
+                           "rest_%": p["remain_pct"], "profil": p["profile"]} for p in plan],
+            "png": str(d / "out" / "render.png"),
+            "hinweis": "Slicing auf ARM64 übersprungen. STEP, STL und Render stehen bereit.",
+            "blocked": ["Slicing auf ARM64 übersprungen (keine native Desktop-Slicer CLI)."],
+            "approval_token": None,
+        }
+
     tag = "_".join(sorted({p["type"].lower() for p in plan}))
     final = d / "out" / f"{d.name}_{tag}_{quality}.gcode"
     shutil.copyfile(res["gcode"], final)

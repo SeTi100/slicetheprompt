@@ -413,9 +413,42 @@ def mesh_replace(
 
 
 def main() -> None:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="slicetheprompt MCP-Server")
+    parser.add_argument(
+        "--transport",
+        choices=["stdio", "sse", "streamable-http"],
+        default=os.environ.get("MCP_TRANSPORT", "stdio"),
+        help="MCP Transport-Protokoll (stdio oder sse, Standard: stdio)",
+    )
+    parser.add_argument(
+        "--host",
+        default=os.environ.get("MCP_HOST", "127.0.0.1"),
+        help="Host für SSE-Server (Standard: 127.0.0.1)",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=int(os.environ.get("MCP_PORT", "8766")),
+        help="Port für SSE-Server (Standard: 8766)",
+    )
+    args = parser.parse_args()
+
     if hasattr(sys.stderr, "reconfigure"):
         sys.stderr.reconfigure(encoding="utf-8")
-    server.run()
+
+    if args.transport == "stdio":
+        server.run(transport="stdio")
+    else:
+        print(f"Starte slicetheprompt MCP-Server ({args.transport}) auf http://{args.host}:{args.port}/sse", file=sys.stderr)
+        if hasattr(server, "settings"):
+            server.settings.host = args.host
+            server.settings.port = args.port
+        try:
+            server.run(transport=args.transport, host=args.host, port=args.port)
+        except TypeError:
+            server.run(transport=args.transport)
 
 
 if __name__ == "__main__":

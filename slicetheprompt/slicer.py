@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import platform
 import re
 import subprocess
 import sys
@@ -20,6 +21,10 @@ from .config import CONFIG_DIR, SLICER_YAML, load_config, write_yaml
 PROFILE_DIR = CONFIG_DIR / "slicer"
 QUALITY_LAYER = {"fein": 0.12, "standard": 0.20, "grob": 0.28}
 IS_WIN = sys.platform.startswith("win")
+
+
+def is_arm64() -> bool:
+    return platform.machine() == "aarch64" or platform.machine().lower() in ("aarch64", "arm64")
 
 
 # ---------------------------------------------------------------- Programm finden
@@ -352,6 +357,8 @@ _AUTO_SETUP_DONE = False
 
 def _slicer_ok(s: dict) -> bool:
     """Passt die gespeicherte Slicer-Konfiguration zu diesem Rechner?"""
+    if is_arm64() and s.get("arm64_bypassed"):
+        return True
     try:
         files = s["files"]
         paths = [s["exe"], files["machine"], *files["process"].values(), *files["filament"].values()]
@@ -366,6 +373,18 @@ def slicer_cfg(auto: bool = True) -> dict:
     einem frischen 'git clone' der erste Slice-Aufruf."""
     global _AUTO_SETUP_DONE
     s = load_config().get("slicer") or {}
+    if is_arm64():
+        return {
+            "kind": "skipped",
+            "exe": "none",
+            "files": {
+                "machine": "",
+                "process": {"standard": "", "fein": "", "grob": ""},
+                "filament": {"pla": "", "petg": ""},
+            },
+            "catalog": {},
+            "arm64_bypassed": True,
+        }
     if _slicer_ok(s) or not auto:
         return s
     if _AUTO_SETUP_DONE:
@@ -506,14 +525,43 @@ def slice_model(model: str | Path, filament_files: list[str], quality: str = "st
                 timeout: int = 900) -> dict:
     """Slicen mit der CLI. model: STL (einfarbig, filament_ids = [Werkzeug 1-basiert]) oder 3MF (mehrteilig).
     filament_files: Profile positionsgenau, Position i = Werkzeug T(i-1) = CFS-Platz i."""
+    model = Path(model).resolve()
+    outdir = Path(outdir or model.parent / "slice").resolve()
+    outdir.mkdir(parents=True, exist_ok=True)
+
+    if platform.machine() == "aarch64" or is_arm64():
+        # ARM64: Subprocess-Aufruf für Slicer komplett überspringen
+        placeholder_gcode = outdir / f"{model.stem}_skipped.gcode"
+        if not placeholder_gcode.exists():
+            placeholder_gcode.write_text(
+                "; Slicing skipped on ARM64 architecture (platform.machine() == 'aarch64')\n"
+                "; STEP, STL, Report und Render wurden erfolgreich generiert.\n"
+                "; Slicing kann extern auf einem PC/Laptop mit Creality Print oder OrcaSlicer erfolgen.\n"
+                "; estimated printing time (normal mode) = 0m 0s\n"
+                "; total filament used [g] = 0.0\n"
+                "; total filament length [mm] = 0.0\n"
+                "; total layers count = 0\n"
+                "; layer_height = 0.2\n"
+                "; filament_type = PLA\n"
+                "; filament_settings_id = default\n",
+                encoding="utf-8",
+            )
+        return {
+            "gcode": str(placeholder_gcode),
+            "seconds": 0.0,
+            "returncode": 0,
+            "command": "skipped (arm64)",
+            "dropped_options": [],
+            "status": "skipped",
+            "skipped": True,
+            "note": "Slicing auf ARM64 übersprungen. STEP, STL und Render stehen bereit.",
+        }
+
     s = slicer_cfg()
     quality = quality.lower()
     files = s["files"]
     if quality not in files["process"]:
         raise ValueError(f"Qualität '{quality}' nicht verfügbar: {', '.join(files['process'])}")
-    model = Path(model).resolve()
-    outdir = Path(outdir or model.parent / "slice").resolve()
-    outdir.mkdir(parents=True, exist_ok=True)
     for old in outdir.glob("*.gcode"):
         old.unlink()
     (outdir / "result.json").unlink(missing_ok=True)

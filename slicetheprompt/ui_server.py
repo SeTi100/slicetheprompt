@@ -11,7 +11,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import math
 import mimetypes
+import os
 from pathlib import Path, PurePosixPath
+import platform
 import socket
 import threading
 import time
@@ -1163,8 +1165,14 @@ class StudioHandler(BaseHTTPRequestHandler):
             self._send_json({"ok": False, "error": f"{type(exc).__name__}: {exc}"}, status=500)
 
 
+DEFAULT_UI_HOST = os.environ.get(
+    "SLICETHEPROMPT_HOST",
+    "0.0.0.0" if platform.machine() in ("aarch64", "arm64") else "127.0.0.1",
+)
+
+
 def create_server(
-    host: str = "127.0.0.1",
+    host: str = DEFAULT_UI_HOST,
     port: int = 8765,
     projects_dir: Path = PROJECTS_DIR,
 ) -> StudioServer:
@@ -1182,7 +1190,7 @@ def create_server(
 
 
 def serve_ui(
-    host: str = "127.0.0.1",
+    host: str = DEFAULT_UI_HOST,
     port: int = 8765,
     project: str | None = None,
     open_browser: bool = True,
@@ -1190,7 +1198,8 @@ def serve_ui(
     """Startet SliceThePrompt im Vordergrund bis Ctrl+C."""
     srv = create_server(host=host, port=port, projects_dir=PROJECTS_DIR)
     actual_port = srv.server_address[1]
-    url = f"http://{host}:{actual_port}/"
+    display_host = "localhost" if host in ("0.0.0.0", "") else host
+    url = f"http://{display_host}:{actual_port}/"
     if project:
         try:
             resolved = project_dir(project).name
@@ -1198,7 +1207,8 @@ def serve_ui(
             resolved = project
         url += f"?project={urllib.parse.quote(resolved)}"
 
-    print(f"SliceThePrompt läuft auf: {url}", flush=True)
+    bound_info = f" (gebunden an {host}:{actual_port})" if host in ("0.0.0.0", "") else ""
+    print(f"SliceThePrompt läuft auf: {url}{bound_info}", flush=True)
     if open_browser:
         threading.Timer(0.35, lambda: webbrowser.open(url)).start()
 

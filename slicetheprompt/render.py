@@ -10,10 +10,11 @@ from .config import STATE_DIR
 _MPL_DIR = STATE_DIR / "matplotlib"
 _MPL_DIR.mkdir(parents=True, exist_ok=True)
 os.environ.setdefault("MPLCONFIGDIR", str(_MPL_DIR))
+os.environ["MPLBACKEND"] = "Agg"
 
 import matplotlib  # noqa: E402
 
-matplotlib.use("Agg")
+matplotlib.use("Agg", force=True)
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 from matplotlib.colors import to_rgba  # noqa: E402

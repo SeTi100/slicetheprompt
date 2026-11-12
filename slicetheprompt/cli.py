@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
+import os
 from pathlib import Path
+import platform
+import sys
 
 import numpy as np
 
@@ -224,8 +226,35 @@ def main(argv=None) -> int:
 
     s = sub.add_parser("ui", help="SliceThePrompt (lokales 3D-Inspektions- & Markierungs-GUI) starten")
     s.add_argument("--project", default=None, help="Direkt dieses Projekt öffnen")
+    s.add_argument(
+        "--host",
+        default=os.environ.get(
+            "SLICETHEPROMPT_HOST",
+            "0.0.0.0" if platform.machine() in ("aarch64", "arm64") else "127.0.0.1",
+        ),
+        help="Host-Adresse (Standard: 0.0.0.0 auf ARM64, sonst 127.0.0.1)",
+    )
     s.add_argument("--port", type=int, default=8765, help="HTTP-Port (Standard: 8765)")
     s.add_argument("--no-browser", action="store_true", help="Browser nicht automatisch öffnen")
+
+    s = sub.add_parser("mcp", help="slicetheprompt MCP-Server starten (stdio oder sse)")
+    s.add_argument(
+        "--transport",
+        choices=["stdio", "sse", "streamable-http"],
+        default=os.environ.get("MCP_TRANSPORT", "stdio"),
+        help="MCP Transport-Protokoll (stdio oder sse, Standard: stdio)",
+    )
+    s.add_argument(
+        "--host",
+        default=os.environ.get("MCP_HOST", "127.0.0.1"),
+        help="Host für SSE-Server (Standard: 127.0.0.1)",
+    )
+    s.add_argument(
+        "--port",
+        type=int,
+        default=int(os.environ.get("MCP_PORT", "8766")),
+        help="Port für SSE-Server (Standard: 8766)",
+    )
 
     s = sub.add_parser("feedback", help="Offenes 3D-UI-Feedback eines Projekts anzeigen oder löschen")
     s.add_argument("project", nargs="?", default="")
@@ -360,7 +389,11 @@ def main(argv=None) -> int:
             _out(calibration.apply_calibration(a.material, {k: float(x.replace(",", ".")) for k, x in vals.items()}))
         elif a.cmd == "ui":
             from .ui_server import serve_ui
-            return serve_ui(port=a.port, project=a.project, open_browser=not a.no_browser)
+            return serve_ui(host=a.host, port=a.port, project=a.project, open_browser=not a.no_browser)
+        elif a.cmd == "mcp":
+            from . import mcp_server
+            sys.argv = [sys.argv[0], f"--transport={a.transport}", f"--host={a.host}", f"--port={a.port}"]
+            return mcp_server.main()
         elif a.cmd == "feedback":
             from .config import project_dir
             from .ui_server import clear_project_feedback, read_project_feedback

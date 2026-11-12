@@ -35,13 +35,16 @@ def run_doctor(fix: bool = True) -> dict:
 
     # Slicer (richtet sich bei Bedarf selbst ein)
     try:
-        from .slicer import _slicer_ok, slicer_cfg
-        s = slicer_cfg(auto=fix)
-        if not _slicer_ok(s):
-            raise RuntimeError("nicht eingerichtet")
-        out["slicer"] = {"ok": True, "exe": s.get("exe"), "machine": s.get("machine"),
-                         "process": s.get("process"), "filament": s.get("filament"),
-                         "catalog": len(s.get("catalog") or {})}
+        from .slicer import _slicer_ok, is_arm64, slicer_cfg
+        if is_arm64():
+            out["slicer"] = {"ok": True, "skipped": True, "note": "ARM64: Slicer bypassed (Desktop-Slicer nicht nativ)"}
+        else:
+            s = slicer_cfg(auto=fix)
+            if not _slicer_ok(s):
+                raise RuntimeError("nicht eingerichtet")
+            out["slicer"] = {"ok": True, "exe": s.get("exe"), "machine": s.get("machine"),
+                             "process": s.get("process"), "filament": s.get("filament"),
+                             "catalog": len(s.get("catalog") or {})}
     except Exception as exc:
         out["ok"] = False
         out["slicer"] = {"ok": False, "error": str(exc),
