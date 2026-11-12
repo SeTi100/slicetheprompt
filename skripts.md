@@ -35,10 +35,12 @@ Startet 3D-Studio, MCP-Server und Open WebUI im Hintergrund und leitet Ausgaben 
 ```bash
 cat << 'EOF' > /root/start_all.sh
 #!/bin/bash
+export PATH="/root/.local/bin:/root/.cargo/bin:$PATH"
+export HOME="/root"
 
 echo "[1/4] Stoppe alte Instanzen..."
-pkill -f "slicetheprompt" 2>/dev/null || true
-pkill -f "open-webui" 2>/dev/null || true
+pkill -f '[s]licetheprompt' 2>/dev/null || true
+pkill -f '[o]pen-webui' 2>/dev/null || true
 sleep 1
 
 echo "[2/4] Starte SliceThePrompt 3D-Studio (Port 8765)..."
@@ -51,7 +53,7 @@ nohup uv run slicetheprompt mcp --transport streamable-http --host 127.0.0.1 --p
 echo "[4/4] Starte Open WebUI (Port 8080)..."
 nohup open-webui serve > /tmp/openwebui.log 2>&1 &
 
-sleep 2
+sleep 3
 echo "============================================="
 echo " Alle Dienste erfolgreich im Hintergrund aktiv!"
 echo " 3D-Studio:   http://127.0.0.1:8765"
