@@ -186,6 +186,10 @@ def test_usage_http_endpoints():
             assert raw_cal["pools"]["gemini"]["anchor_weekly"]["ring_color"] == "green"
             assert raw_cal["pools"]["gemini"]["anchor_weekly"]["source"] == "ocr+ring"
             assert raw_cal["pools"]["argon"]["anchor_weekly"]["ring_color"] == "red"
+            assert isinstance(ov3.get("burn_matrix"), list) and len(ov3["burn_matrix"]) >= 1
+            for bm_row in ov3["burn_matrix"]:
+                assert "model_key" in bm_row and "effort_label" in bm_row
+                assert "weekly" in bm_row
 
         finally:
             srv.shutdown()

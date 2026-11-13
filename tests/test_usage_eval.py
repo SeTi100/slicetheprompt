@@ -392,6 +392,44 @@ def test_data_points_intervals_and_burn_rate():
         assert UE.extract_model_effort("", "", "MODEL_PLACEHOLDER_M318") == "High"
 
 
+def test_model_effort_burn_matrix_prior_and_ridge():
+    with tempfile.TemporaryDirectory() as td:
+        agy, proot, cal, now = build_synthetic_env(Path(td))
+        # Ohne Intervalle: Prior-Werte nach Modell + Effort
+        ov0 = UE.build_usage_overview(days=7.0, agy_dir=agy, projects_root=proot, cal_path=cal, now_utc=now)
+        bm0 = ov0["burn_matrix"]
+        assert len(bm0) >= 2
+        keys0 = {(r["model_key"], r["effort_label"]) for r in bm0}
+        assert ("hydrogen", "Medium") in keys0
+        assert all(r["weekly"]["source"] == "prior" for r in bm0 if r.get("weekly"))
+
+        # Mit Intervall [t1, t2] für Gemini: Wechsel auf empirical + angepasster Faktor
+        t1 = now - dt.timedelta(minutes=50)
+        t2 = now
+        UE.calibrate_pool_snapshot(
+            "gemini", "weekly",
+            pct_left=85.0, resets_in="2d 0h",
+            agy_dir=agy, cal_path=cal, now_utc=t1,
+            ring_pct=85.0, ring_color="green", ocr_pct=85.0, source="ocr+ring",
+        )
+        UE.calibrate_pool_snapshot(
+            "gemini", "weekly",
+            pct_left=75.0, resets_in="1d 23h",
+            agy_dir=agy, cal_path=cal, now_utc=t2,
+            ring_pct=75.0, ring_color="green", ocr_pct=75.0, source="ocr+ring",
+        )
+        ov1 = UE.build_usage_overview(days=7.0, agy_dir=agy, projects_root=proot, cal_path=cal, now_utc=now)
+        bm1 = ov1["burn_matrix"]
+        gem_rows = [r for r in bm1 if r["pool_id"] == "gemini"]
+        assert any(r["weekly"]["source"] == "empirical" and r["weekly"]["empirical_intervals"] >= 1 for r in gem_rows)
+        for r in gem_rows:
+            wk = r["weekly"]
+            assert wk["pct_per_turn"] > 0
+            assert wk["pct_per_1m_tokens"] > 0
+            assert wk["est_turns_left"] is not None and wk["est_turns_left"] > 0
+            assert 0.25 <= wk["calibration_factor"] <= 4.0
+
+
 def run_all() -> None:
     tests = [
         test_model_resolution_and_overrides,
@@ -400,6 +438,7 @@ def run_all() -> None:
         test_three_pools_calibration_and_eco_settings,
         test_ring_history_and_metadata_cap,
         test_data_points_intervals_and_burn_rate,
+        test_model_effort_burn_matrix_prior_and_ridge,
     ]
     for fn in tests:
         fn()

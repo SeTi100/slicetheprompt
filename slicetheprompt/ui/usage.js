@@ -20,6 +20,8 @@ const state = {
   selectedKind: "project", // "project" | "conversation"
   selectedId: null,
   calibrationOpen: false,
+  burnFilterPool: "all",
+  burnFilterHorizon: "both",
   lightboxImg: null,
   onOpenVersion: null,
   listenersBound: false,
@@ -951,6 +953,138 @@ function renderCalibrationDrawer() {
   });
 }
 
+function renderBurnMatrix() {
+  const host = document.getElementById("usage-burn-matrix");
+  if (!host) return;
+  const ov = state.overview;
+  const rows = ov?.burn_matrix;
+  if (!ov || !Array.isArray(rows) || !rows.length) {
+    host.innerHTML = "";
+    return;
+  }
+
+  const pools = ov.pools || {};
+  const poolBtns = [
+    `<button type="button" class="burn-f-btn ${state.burnFilterPool === "all" ? "active" : ""}" data-burn-pool="all">Alle Pools</button>`,
+    ...Object.values(pools).map((p) => {
+      const active = state.burnFilterPool === p.pool_id ? "active" : "";
+      return `<button type="button" class="burn-f-btn ${active}" data-burn-pool="${esc(p.pool_id)}"><span class="pool-dot" style="background:${esc(p.color)}"></span>${esc(p.label)}</button>`;
+    }),
+  ].join("");
+
+  const horizonBtns = [
+    { id: "both", label: "5h & Weekly" },
+    { id: "weekly", label: "Weekly" },
+    { id: "5h", label: "5h" },
+  ]
+    .map((h) => `<button type="button" class="burn-f-btn ${state.burnFilterHorizon === h.id ? "active" : ""}" data-burn-h="${h.id}">${h.label}</button>`)
+    .join("");
+
+  const filtered = rows.filter((r) => state.burnFilterPool === "all" || r.pool_id === state.burnFilterPool);
+  const show5h = state.burnFilterHorizon === "both" || state.burnFilterHorizon === "5h";
+  const showWk = state.burnFilterHorizon === "both" || state.burnFilterHorizon === "weekly";
+
+  const maxTurn5h = Math.max(0.001, ...filtered.map((r) => Number(r.h5?.pct_per_turn) || 0));
+  const maxTurnWk = Math.max(0.001, ...filtered.map((r) => Number(r.weekly?.pct_per_turn) || 0));
+  const am = ov.active_model;
+
+  const fmtCell = (obj, maxVal, color) => {
+    if (!obj) return `<span class="status-muted">—</span>`;
+    const pctT = Number(obj.pct_per_turn || 0);
+    const pct1m = Number(obj.pct_per_1m_tokens || 0);
+    const wPct = Math.min(100, Math.round((pctT / maxVal) * 100));
+    const leftTxt = obj.est_turns_left != null ? `~${obj.est_turns_left} Turns frei` : "—";
+    const srcCls = obj.source === "empirical" ? "empirical" : "prior";
+    const srcTxt = obj.source === "empirical" ? `Empirisch (${obj.empirical_intervals} Int. · ${obj.calibration_factor}×)` : "Prior (1.0×)";
+    return `
+      <div class="burn-cell" title="${esc(srcTxt)} · ${Number(obj.pct_per_call || 0).toFixed(3)}%/Call · ${fmtTokens(obj.tokens_per_1pct || 0)} Tok/1%">
+        <div class="burn-cell-top">
+          <strong>${pctT.toFixed(2)}%</strong><span class="burn-unit">/Turn</span>
+          <span class="burn-sub-sep">·</span>
+          <span>${pct1m.toFixed(1)}%</span><span class="burn-unit">/1M</span>
+        </div>
+        <div class="burn-bar"><span style="width:${wPct}%;background:${esc(color)}"></span></div>
+        <div class="burn-cell-foot">
+          <span>${esc(leftTxt)}</span>
+          <span class="burn-src-tag ${srcCls}">${obj.source === "empirical" ? `${obj.calibration_factor}× (${obj.empirical_intervals})` : "Prior"}</span>
+        </div>
+      </div>`;
+  };
+
+  const bodyRows = filtered
+    .map((r) => {
+      const isActive = am && am.model_name === r.model_name && (am.effort || "Standard") === (r.effort_label || "Standard");
+      const srcObj = r.weekly || r.h5 || {};
+      const srcCls = srcObj.source === "empirical" ? "empirical" : "prior";
+      const relTxt = r.relative_intensity > 1 ? `${r.relative_intensity}×` : "1.0× (Basis)";
+      return `
+        <tr class="${isActive ? "burn-row-active" : ""}">
+          <td>
+            <div class="burn-model-cell">
+              <span class="pool-dot" style="background:${esc(r.pool_color)}"></span>
+              <div>
+                <div class="burn-model-name">
+                  <strong>${esc(r.model_name)}</strong>
+                  <span class="effort-pill">${esc(r.effort_label)}</span>
+                  ${isActive ? `<span class="cost-tag-used">Aktiv</span>` : ""}
+                </div>
+                <div class="burn-model-sub">${esc(r.pool_label)} · Intensität ${esc(relTxt)}</div>
+              </div>
+            </div>
+          </td>
+          <td class="burn-basis-cell">
+            <span class="burn-src-tag ${srcCls}">${srcObj.source === "empirical" ? `Empirisch · ${srcObj.empirical_intervals} Int.` : "Prior (CU-Modell)"}</span>
+          </td>
+          ${show5h ? `<td>${fmtCell(r.h5, maxTurn5h, r.pool_color)}</td>` : ""}
+          ${showWk ? `<td>${fmtCell(r.weekly, maxTurnWk, r.pool_color)}</td>` : ""}
+          <td class="burn-prof-cell">
+            <div><strong>${r.turns}</strong> Turns · ${r.calls} Calls</div>
+            <div class="burn-model-sub">Ø Think ${Number(r.thinking_share_pct || 0).toFixed(0)}% · Cache ${Number(r.cache_hit_pct || 0).toFixed(0)}% · ${r.pct_weekly_observed}% Wk</div>
+          </td>
+        </tr>`;
+    })
+    .join("");
+
+  host.innerHTML = `
+    <div class="burn-head">
+      <div class="burn-title">
+        <strong>🔥 Modell- &amp; Effort-Burn-Rate</strong>
+        <span class="burn-sub">Prior + Ridge-Kalibrierung über diskrete Screenshot-Intervalle</span>
+      </div>
+      <div class="burn-filters">
+        <div class="burn-btn-grp">${poolBtns}</div>
+        <div class="burn-btn-grp">${horizonBtns}</div>
+      </div>
+    </div>
+    <div class="burn-table-wrap">
+      <table class="burn-table">
+        <thead>
+          <tr>
+            <th>Modell &amp; Effort</th>
+            <th>Basis</th>
+            ${show5h ? "<th>5h Limit-Burn</th>" : ""}
+            ${showWk ? "<th>Weekly Limit-Burn</th>" : ""}
+            <th>Beobachtet</th>
+          </tr>
+        </thead>
+        <tbody>${bodyRows}</tbody>
+      </table>
+    </div>`;
+
+  host.querySelectorAll("[data-burn-pool]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.burnFilterPool = btn.getAttribute("data-burn-pool") || "all";
+      renderBurnMatrix();
+    });
+  });
+  host.querySelectorAll("[data-burn-h]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.burnFilterHorizon = btn.getAttribute("data-burn-h") || "both";
+      renderBurnMatrix();
+    });
+  });
+}
+
 function renderDashboardHeader() {
   const host = document.getElementById("usage-top-area");
   if (!host) return;
@@ -958,6 +1092,7 @@ function renderDashboardHeader() {
     host.innerHTML = state.overviewError
       ? `<div class="usage-api-error"><strong>Usage-API nicht aktiv:</strong> ${esc(state.overviewError)} — Falls <code>slicetheprompt ui</code> bereits vorher lief, Server einmal neu starten.</div>`
       : `<div class="status-muted">Lade Konto-Quotas …</div>`;
+    renderBurnMatrix();
     return;
   }
   const ov = state.overview;
@@ -1044,6 +1179,8 @@ function renderDashboardHeader() {
       console.error(err);
     }
   });
+
+  renderBurnMatrix();
 }
 
 // ============================================================================

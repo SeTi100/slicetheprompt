@@ -912,22 +912,19 @@ def evaluate_conversation_turns(
 # Account-Pools (5h + Weekly) & Anker-Kalibrierung
 # -----------------------------------------------------------------------------
 
-def _summarize_pool_data_points(
-    pool_id: str,
+def _extract_valid_intervals(
     pool_cfg: dict[str, Any],
-    all_requests: list[tuple[dt.datetime, str, ModelSpec, CostBreakdown]],
-) -> dict[str, Any]:
-    """Zählt gespeicherte diskrete Snapshot-Datenpunkte und berechnet Intervall-Burn-Rates."""
-    hist = pool_cfg.get("ring_history") or []
-    by_h: dict[str, list[dict[str, Any]]] = {"weekly": [], "5h": []}
-    last_ts_dt: dt.datetime | None = None
+    horizon_key: str,
+) -> tuple[list[dict[str, Any]], list[tuple[dt.datetime, dt.datetime, float, float]], str | None]:
+    """Liest sortierte Snapshots und gültige Intervalle [t_i, t_{i+1}] im selben Reset-Zyklus."""
+    win_h = 168.0 if horizon_key == "weekly" else 5.0
+    reset_tol_sec = 7200.0 if horizon_key == "weekly" else 1200.0
+    pts: list[dict[str, Any]] = []
     last_ts_iso: str | None = None
+    last_ts_dt: dt.datetime | None = None
 
-    for entry in hist:
-        if not isinstance(entry, dict):
-            continue
-        hk = entry.get("horizon")
-        if hk not in by_h:
+    for entry in (pool_cfg.get("ring_history") or []):
+        if not isinstance(entry, dict) or entry.get("horizon") != horizon_key:
             continue
         ts_dt = _parse_utc(entry.get("ts"))
         if ts_dt is None or entry.get("pct_left") is None:
@@ -935,44 +932,56 @@ def _summarize_pool_data_points(
         if last_ts_dt is None or ts_dt > last_ts_dt:
             last_ts_dt = ts_dt
             last_ts_iso = ts_dt.isoformat()
-        by_h[hk].append({
+        pts.append({
             "ts": ts_dt,
             "pct_left": float(entry["pct_left"]),
             "resets_at": _parse_utc(entry.get("resets_at")),
         })
 
+    pts.sort(key=lambda x: x["ts"])
+    intervals: list[tuple[dt.datetime, dt.datetime, float, float]] = []
+    for idx in range(len(pts) - 1):
+        p0, p1 = pts[idx], pts[idx + 1]
+        dt_h = (p1["ts"] - p0["ts"]).total_seconds() / 3600.0
+        if dt_h <= 0.0:
+            continue
+        r0, r1 = p0["resets_at"], p1["resets_at"]
+        if r0 is not None and r1 is not None:
+            same_cycle = abs((r1 - r0).total_seconds()) <= reset_tol_sec
+        else:
+            same_cycle = dt_h < win_h and p1["pct_left"] <= p0["pct_left"] + 0.5
+        if not same_cycle:
+            continue
+        intervals.append((p0["ts"], p1["ts"], p0["pct_left"] - p1["pct_left"], dt_h))
+    return pts, intervals, last_ts_iso
+
+
+def _summarize_pool_data_points(
+    pool_id: str,
+    pool_cfg: dict[str, Any],
+    all_requests: list[tuple[dt.datetime, str, ModelSpec, CostBreakdown]],
+) -> dict[str, Any]:
+    """Zählt gespeicherte diskrete Snapshot-Datenpunkte und berechnet Intervall-Burn-Rates."""
     pool_reqs = [(ts, c.cu) for ts, pid, _, c in all_requests if pid == pool_id]
     stats: dict[str, dict[str, Any]] = {}
-    for hk, win_h in (("weekly", 168.0), ("5h", 5.0)):
-        pts = sorted(by_h[hk], key=lambda x: x["ts"])
-        ivs = 0
+    last_ts_iso: str | None = None
+    for hk in ("weekly", "5h"):
+        pts, intervals, hk_last = _extract_valid_intervals(pool_cfg, hk)
+        if hk_last and (last_ts_iso is None or hk_last > last_ts_iso):
+            last_ts_iso = hk_last
         sum_dpct = 0.0
         sum_cu = 0.0
         sum_dt_h = 0.0
-        reset_tol_sec = 7200.0 if hk == "weekly" else 1200.0
-        for idx in range(len(pts) - 1):
-            p0, p1 = pts[idx], pts[idx + 1]
-            dt_h = (p1["ts"] - p0["ts"]).total_seconds() / 3600.0
-            if dt_h <= 0.0:
-                continue
-            r0, r1 = p0["resets_at"], p1["resets_at"]
-            if r0 is not None and r1 is not None:
-                same_cycle = abs((r1 - r0).total_seconds()) <= reset_tol_sec
-            else:
-                same_cycle = dt_h < win_h and p1["pct_left"] <= p0["pct_left"] + 0.5
-            if not same_cycle:
-                continue
-            ivs += 1
-            dpct = p0["pct_left"] - p1["pct_left"]
+        for t0, t1, dpct, dt_h in intervals:
             if dpct > 0.0:
-                iv_cu = sum(cu for r_ts, cu in pool_reqs if p0["ts"] < r_ts <= p1["ts"])
+                iv_cu = sum(cu for r_ts, cu in pool_reqs if t0 < r_ts <= t1)
                 if iv_cu > 0.0:
                     sum_dpct += dpct
                     sum_cu += iv_cu
                     sum_dt_h += dt_h
         stats[hk] = {
             "points": len(pts),
-            "intervals": ivs,
+            "intervals": len(intervals),
             "pct_per_1k_cu": round(sum_dpct / (sum_cu / 1000.0), 2) if sum_cu > 0.0 else None,
             "pct_per_h": round(sum_dpct / sum_dt_h, 2) if sum_dt_h > 0.01 and sum_dpct > 0.0 else None,
         }
@@ -1365,6 +1374,186 @@ def _match_versions_to_turns(
     return unmatched
 
 
+def _compute_model_effort_burn_matrix(
+    cfg: dict[str, Any],
+    pools_status: dict[str, dict[str, Any]],
+    effort_requests: list[tuple[dt.datetime, str, ModelSpec, CostBreakdown, str]],
+    turn_records: list[EvaluatedTurn],
+) -> list[dict[str, Any]]:
+    """Berechnet modell- & effort-spezifische Burn-Rates per Prior + Ridge-Intervall-Kalibrierung."""
+    import numpy as np
+
+    groups: dict[tuple[str, str], dict[str, Any]] = {}
+    for ts, pid, spec, cost, effort in effort_requests:
+        eff = effort or "Standard"
+        gk = (spec.key, eff)
+        g = groups.setdefault(gk, {
+            "model_key": spec.key,
+            "model_name": spec.display_name,
+            "effort": effort,
+            "effort_label": eff,
+            "pool_id": pid,
+            "calls": 0,
+            "turns": 0,
+            "cu": 0.0,
+            "tokens": 0,
+            "fresh_in": 0,
+            "cache_read": 0,
+            "thinking_tokens": 0,
+            "output_total": 0,
+            "turn_cu": 0.0,
+            "turn_tokens": 0,
+            "reqs": [],
+        })
+        g["calls"] += 1
+        g["cu"] += cost.cu
+        g["tokens"] += cost.total_tokens
+        g["fresh_in"] += cost.fresh_in
+        g["cache_read"] += cost.cache_read
+        g["thinking_tokens"] += cost.thinking_tokens
+        g["output_total"] += cost.output_total
+        g["reqs"].append((ts, cost.cu))
+
+    for t in turn_records:
+        eff = t.effort or "Standard"
+        gk = (t.model_key, eff)
+        if gk not in groups:
+            continue
+        groups[gk]["turns"] += 1
+        groups[gk]["turn_cu"] += t.total_cost.cu
+        groups[gk]["turn_tokens"] += t.total_cost.total_tokens
+
+    # Pro Pool & Horizont Ridge-Kalibrierung über gültige Intervalle [t_i, t_{i+1}]
+    pool_groups: dict[str, list[tuple[str, str]]] = {}
+    for gk, g in groups.items():
+        pool_groups.setdefault(g["pool_id"], []).append(gk)
+
+    calib_by_gk_h: dict[tuple[tuple[str, str], str], dict[str, Any]] = {}
+    for pid, gk_list in pool_groups.items():
+        p_cfg = (cfg.get("pools") or {}).get(pid) or {}
+        p_stat = pools_status.get(pid) or {}
+        m_count = len(gk_list)
+        for hk in ("weekly", "5h"):
+            h_stat = p_stat.get("weekly" if hk == "weekly" else "h5")
+            if not h_stat:
+                continue
+            limit_cu = float(h_stat.get("limit_cu") or (15000.0 if hk == "weekly" else 2500.0))
+            w_prior = 100.0 / limit_cu if limit_cu > 0 else 0.0
+            _, intervals, _ = _extract_valid_intervals(p_cfg, hk)
+
+            x_rows: list[list[float]] = []
+            y_vals: list[float] = []
+            for t0, t1, dpct, _ in intervals:
+                if dpct < 0.0:
+                    continue
+                row = [
+                    sum(cu for r_ts, cu in groups[gk]["reqs"] if t0 < r_ts <= t1)
+                    for gk in gk_list
+                ]
+                if sum(row) <= 0.0:
+                    continue
+                x_rows.append(row)
+                y_vals.append(dpct)
+
+            alphas = np.ones(m_count, dtype=float)
+            iv_counts = [0] * m_count
+            if x_rows and w_prior > 0.0:
+                X = np.array(x_rows, dtype=float)
+                y = np.array(y_vals, dtype=float)
+                iv_counts = [int(np.sum(X[:, j] > 0.0)) for j in range(m_count)]
+                lam = max(1e-3, (limit_cu * 0.05) ** 2)
+                delta_y = y - X @ (np.ones(m_count, dtype=float) * w_prior)
+                reg_mat = X.T @ X + lam * np.eye(m_count, dtype=float)
+                delta_w = np.linalg.solve(reg_mat, X.T @ delta_y)
+                w_hat = np.clip(w_prior + delta_w, 0.25 * w_prior, 4.0 * w_prior)
+                alphas = w_hat / w_prior
+
+            for j, gk in enumerate(gk_list):
+                calib_by_gk_h[(gk, hk)] = {
+                    "w_eff": w_prior * float(alphas[j]),
+                    "alpha": round(float(alphas[j]), 2),
+                    "empirical_intervals": iv_counts[j],
+                    "source": "empirical" if iv_counts[j] >= 1 else "prior",
+                    "rem_pct": float(h_stat.get("pct_left") or 0.0),
+                    "limit_cu": limit_cu,
+                }
+
+    rows: list[dict[str, Any]] = []
+    for gk, g in groups.items():
+        calls = max(1, g["calls"])
+        turns = g["turns"]
+        avg_cu_call = g["cu"] / calls
+        avg_cu_turn = (g["turn_cu"] / turns) if turns > 0 else avg_cu_call
+        avg_cu_tok = (g["cu"] / g["tokens"]) if g["tokens"] > 0 else 0.0
+        tot_in = g["fresh_in"] + g["cache_read"]
+        cache_hit_pct = (g["cache_read"] / tot_in * 100.0) if tot_in > 0 else 0.0
+        think_share_pct = (g["thinking_tokens"] / g["output_total"] * 100.0) if g["output_total"] > 0 else 0.0
+
+        def _build_h(hk: str) -> dict[str, Any] | None:
+            cal_h = calib_by_gk_h.get((gk, hk))
+            if not cal_h:
+                return None
+            w_eff = cal_h["w_eff"]
+            pct_call = avg_cu_call * w_eff
+            pct_turn = avg_cu_turn * w_eff
+            pct_1m = avg_cu_tok * 1_000_000.0 * w_eff
+            tok_per_1pct = (1.0 / (avg_cu_tok * w_eff)) if (avg_cu_tok * w_eff) > 0.0 else 0.0
+            rem = cal_h["rem_pct"]
+            return {
+                "pct_per_call": round(pct_call, 3),
+                "pct_per_turn": round(pct_turn, 3),
+                "pct_per_1m_tokens": round(pct_1m, 2),
+                "tokens_per_1pct": round(tok_per_1pct, 0),
+                "est_calls_left": round(rem / pct_call, 1) if pct_call > 0.0005 else None,
+                "est_turns_left": round(rem / pct_turn, 1) if pct_turn > 0.0005 else None,
+                "calibration_factor": cal_h["alpha"],
+                "empirical_intervals": cal_h["empirical_intervals"],
+                "source": cal_h["source"],
+            }
+
+        wk_obj = _build_h("weekly")
+        h5_obj = _build_h("5h")
+        p_stat = pools_status.get(g["pool_id"]) or {}
+        wk_lim = float((p_stat.get("weekly") or {}).get("limit_cu") or 15000.0)
+
+        rows.append({
+            "model_key": g["model_key"],
+            "model_name": g["model_name"],
+            "effort": g["effort"],
+            "effort_label": g["effort_label"],
+            "pool_id": g["pool_id"],
+            "pool_label": p_stat.get("label", g["pool_id"]),
+            "pool_color": p_stat.get("color", "#38bdf8"),
+            "calls": g["calls"],
+            "turns": turns,
+            "cu": round(g["cu"], 1),
+            "tokens": g["tokens"],
+            "avg_cu_per_turn": round(avg_cu_turn, 2),
+            "avg_tokens_per_turn": round((g["turn_tokens"] / turns) if turns > 0 else (g["tokens"] / calls), 0),
+            "cache_hit_pct": round(cache_hit_pct, 1),
+            "thinking_share_pct": round(think_share_pct, 1),
+            "pct_weekly_observed": round(g["cu"] / wk_lim * 100.0, 2) if wk_lim > 0 else 0.0,
+            "weekly": wk_obj,
+            "h5": h5_obj,
+        })
+
+    # Relative Intensität pro Pool (gegenüber dem sparsamsten aktiven Modell/Effort im Pool)
+    min_turn_by_pool: dict[str, float] = {}
+    for r in rows:
+        val = ((r.get("weekly") or r.get("h5")) or {}).get("pct_per_turn") or 0.0
+        if val > 0.0:
+            pid = r["pool_id"]
+            if pid not in min_turn_by_pool or val < min_turn_by_pool[pid]:
+                min_turn_by_pool[pid] = val
+    for r in rows:
+        base_min = min_turn_by_pool.get(r["pool_id"], 0.0)
+        val = ((r.get("weekly") or r.get("h5")) or {}).get("pct_per_turn") or 0.0
+        r["relative_intensity"] = round(val / base_min, 2) if (base_min > 0.0 and val > 0.0) else 1.0
+
+    rows.sort(key=lambda x: (x["pool_id"], -((x.get("weekly") or x.get("h5") or {}).get("pct_per_turn") or 0.0)))
+    return rows
+
+
 def _build_fading_volume_plot(
     all_requests: list[tuple[dt.datetime, str, ModelSpec, CostBreakdown]],
     pools_status: dict[str, dict[str, Any]],
@@ -1526,6 +1715,7 @@ def build_usage_overview(
 
     # 1. Alle Requests für Pool- & Fading-Plot über ALLE Workspaces einsammeln
     all_requests: list[tuple[dt.datetime, str, ModelSpec, CostBreakdown]] = []
+    effort_requests: list[tuple[dt.datetime, str, ModelSpec, CostBreakdown, str]] = []
     # Root-Konversationen (keine Subagenten!) für Workspace- & Teile-Ansicht
     root_convs: list[str] = []
     latest_req_info: dict[str, Any] | None = None
@@ -1553,10 +1743,11 @@ def build_usage_overview(
                         req.fresh_in, req.cache_read, req.output_total,
                         req.thinking_tokens, req.visible_output, spec, cfg,
                     )
+                    eff = extract_model_effort(req.model_display, req.model_slug, req.model_enum)
                     all_requests.append((req.timestamp, spec.pool_id, spec, cost))
+                    effort_requests.append((req.timestamp, spec.pool_id, spec, cost, eff))
                     if latest_req_ts is None or req.timestamp > latest_req_ts:
                         latest_req_ts = req.timestamp
-                        eff = extract_model_effort(req.model_display, req.model_slug, req.model_enum)
                         disp = req.model_display or (f"{spec.display_name} ({eff})" if eff else spec.display_name)
                         latest_req_info = {
                             "model_name": spec.display_name,
@@ -1578,11 +1769,13 @@ def build_usage_overview(
     project_turns_map: dict[str, list[EvaluatedTurn]] = {}
     project_ws_map: dict[str, str] = {}
     conv_items: list[dict[str, Any]] = []
+    all_root_turns: list[EvaluatedTurn] = []
 
     for cid in root_convs:
         turns = evaluate_conversation_turns(cid, cfg, base, summaries, children_map, known_projects)
         if not turns:
             continue
+        all_root_turns.extend(turns)
         csum = summaries.get(cid)
         ws_name = csum.workspace_name if csum else "unbekannt"
         ws_entry = workspaces.setdefault(ws_name, {
@@ -1707,6 +1900,7 @@ def build_usage_overview(
             pstat["weekly"]["parts_remaining_est"] = round(pstat["weekly"]["left_cu"] / ref_part_cu, 1) if ref_part_cu > 0 else 0.0
 
     plot_data = _build_fading_volume_plot(all_requests, pools_status, now, days=min(days, 7.0))
+    burn_matrix = _compute_model_effort_burn_matrix(cfg, pools_status, effort_requests, all_root_turns)
 
     dp_total = sum((p.get("data_points") or {}).get("total", 0) for p in pools_status.values())
     dp_intervals = sum((p.get("data_points") or {}).get("intervals_total", 0) for p in pools_status.values())
@@ -1722,6 +1916,7 @@ def build_usage_overview(
         },
         "pools": pools_status,
         "active_model": latest_req_info,
+        "burn_matrix": burn_matrix,
         "data_points_summary": {
             "total_points": dp_total,
             "total_intervals": dp_intervals,
