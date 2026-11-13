@@ -316,11 +316,12 @@ def test_three_pools_calibration_and_eco_settings():
 def test_ring_history_and_metadata_cap():
     with tempfile.TemporaryDirectory() as td:
         agy, proot, cal, now = build_synthetic_env(Path(td))
-        # Seed 105 Einträge über yaml -> cap auf 100 prüfen
+        # Seed > MAX_RING_HISTORY Einträge über yaml -> cap auf MAX_RING_HISTORY prüfen
         cfg = UE.load_calibration(cal)
+        seed_n = UE.MAX_RING_HISTORY + 4
         cfg["pools"]["gemini"]["ring_history"] = [
             {"ts": now.isoformat(), "horizon": "weekly", "pct_left": 50.0, "ring_pct": 50.0, "ring_color": "green", "source": "ocr+ring"}
-            for _ in range(104)
+            for _ in range(seed_n)
         ]
         UE.save_calibration(cfg, cal)
 
@@ -332,7 +333,7 @@ def test_ring_history_and_metadata_cap():
         )
         cfg2 = UE.load_calibration(cal)
         hist = cfg2["pools"]["gemini"]["ring_history"]
-        assert len(hist) == 100
+        assert len(hist) == UE.MAX_RING_HISTORY
         assert hist[-1]["ring_pct"] == 60.6
         assert hist[-1]["ocr_ring_diff"] == 0.4
 
@@ -342,6 +343,47 @@ def test_ring_history_and_metadata_cap():
         assert rt["ring_pct"] == 60.6
         assert rt["ring_color"] == "green"
         assert rt["diff_pct"] == 0.4
+        assert ov["pools"]["gemini"]["data_points"]["weekly"] == UE.MAX_RING_HISTORY
+        assert ov["data_points_summary"]["total_points"] >= UE.MAX_RING_HISTORY
+
+
+def test_data_points_intervals_and_burn_rate():
+    with tempfile.TemporaryDirectory() as td:
+        agy, proot, cal, now = build_synthetic_env(Path(td))
+        # t1: vor den synthetischen Gemini-Requests in build_synthetic_env (now-40m bis now-10m)
+        t1 = now - dt.timedelta(minutes=50)
+        t2 = now
+        UE.calibrate_pool_snapshot(
+            "gemini", "weekly",
+            pct_left=80.0, resets_in="2d 0h",
+            agy_dir=agy, cal_path=cal, now_utc=t1,
+            ring_pct=80.0, ring_color="green", ocr_pct=80.0, source="ocr+ring",
+        )
+        UE.calibrate_pool_snapshot(
+            "gemini", "weekly",
+            pct_left=74.0, resets_in="1d 23h",
+            agy_dir=agy, cal_path=cal, now_utc=t2,
+            ring_pct=74.0, ring_color="green", ocr_pct=74.0, source="ocr+ring",
+        )
+        # Manueller 5h-Snapshot zählt ebenfalls als Datenpunkt
+        UE.calibrate_pool_snapshot(
+            "gemini", "5h",
+            pct_left=92.0, resets_in="4h 0m",
+            agy_dir=agy, cal_path=cal, now_utc=t2,
+        )
+
+        ov = UE.build_usage_overview(days=7.0, agy_dir=agy, projects_root=proot, cal_path=cal, now_utc=now)
+        dp = ov["pools"]["gemini"]["data_points"]
+        assert dp["weekly"] == 2
+        assert dp["h5"] == 1
+        assert dp["total"] == 3
+        assert dp["intervals_weekly"] == 1
+        assert dp["intervals_5h"] == 0
+        assert dp["intervals_total"] == 1
+        assert dp["burn_rate"]["weekly_pct_per_1k_cu"] is not None
+        assert dp["burn_rate"]["weekly_pct_per_1k_cu"] > 0
+        assert ov["data_points_summary"]["total_points"] == 3
+        assert ov["data_points_summary"]["total_intervals"] == 1
 
 
 def run_all() -> None:
@@ -351,6 +393,7 @@ def run_all() -> None:
         test_subagent_rollup_cost_split_and_versions,
         test_three_pools_calibration_and_eco_settings,
         test_ring_history_and_metadata_cap,
+        test_data_points_intervals_and_burn_rate,
     ]
     for fn in tests:
         fn()

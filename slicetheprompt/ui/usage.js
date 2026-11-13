@@ -610,10 +610,20 @@ function _renderCalSlotField(p, horizon, labelText, placeholderText, existingHor
     }
   }
 
+  const dp = p.data_points || {};
+  const dpCount = Number(horizon === "5h" ? dp.h5 : dp.weekly) || 0;
+  const ivCount = Number(horizon === "5h" ? dp.intervals_5h : dp.intervals_weekly) || 0;
+  const br = dp.burn_rate || {};
+  const brVal = horizon === "5h" ? br.h5_pct_per_1k_cu : br.weekly_pct_per_1k_cu;
+  const brTxt = brVal != null ? ` · ~${Number(brVal).toFixed(2)}%/1k CU` : "";
+  const dpClass = dpCount >= 2 ? "ready" : (dpCount === 1 ? "partial" : "empty");
+  const dpTitle = `Gespeicherte Zeitpunkte (t_i) für ${p.label} (${horizon}): ${dpCount} · Auswertbare Burn-Rate-Intervalle [t_i, t_{i+1}]: ${ivCount}`;
+  const dpPill = `<span class="cal-dp-pill ${dpClass}" title="${esc(dpTitle)}">${dpCount} Pkt${ivCount > 0 ? ` · ${ivCount} Int.` : ""}${esc(brTxt)}</span>`;
+
   return `
     <div class="cal-field-wrap">
       <div class="cal-field-pair">
-        <label>${esc(labelText)}</label>
+        <label>${esc(labelText)} ${dpPill}</label>
         <input type="number" step="0.5" min="0" max="100" data-cal-pool="${esc(p.pool_id)}" data-cal-h="${esc(horizon)}" data-cal-field="pct" value="${esc(pctVal)}" />
         <input type="text" placeholder="${esc(placeholderText)}" data-cal-pool="${esc(p.pool_id)}" data-cal-h="${esc(horizon)}" data-cal-field="reset" value="${esc(rstVal)}" />
       </div>
@@ -655,7 +665,18 @@ function renderCalibrationDrawer() {
     ssStatusHtml = `<span class="cal-ss-status muted">Tipp: Antigravity-Popover mit Win+Shift+S kopieren &amp; hier per Strg+V einfügen.</span>`;
   }
 
+  const dps = ov.data_points_summary || {};
+  const totPts = Number(dps.total_points) || 0;
+  const totIvs = Number(dps.total_intervals) || 0;
+  const dpSumCls = totIvs >= 1 ? "ready" : (totPts >= 1 ? "partial" : "empty");
+  const dpSumHtml = `
+    <div class="cal-dp-summary ${dpSumCls}" title="Jeder gespeicherte Screenshot liefert diskrete Zeitpunkte t_i je Pool/Horizont zur Berechnung der mehrdimensionalen Usage-Burn-Rate.">
+      <span>📊 <strong>Datenbasis:</strong> ${totPts} Datenpunkt${totPts === 1 ? "" : "e"} · ${totIvs} Burn-Rate-Intervall${totIvs === 1 ? "" : "e"}</span>
+      <span class="cal-dp-hint">${totPts === 0 ? "Ersten Screenshot einfügen &amp; speichern" : (totIvs === 0 ? "Noch 1 weiterer Snapshot im selben Reset-Zyklus für erstes Intervall" : "Jeder weitere Screenshot verfeinert das Modell")}</span>
+    </div>`;
+
   const dropZoneHtml = `
+    ${dpSumHtml}
     <div id="usage-cal-dropzone" class="cal-dropzone">
       <input type="file" id="cal-screenshot-file" accept="image/*" class="hidden" />
       <div class="cal-dz-left">
@@ -944,6 +965,20 @@ function renderDashboardHeader() {
           : (rt.source || "");
         rtHtml = `<div class="pool-ring-meta" title="Letzter Ring-Track / Kalibrierungsabgleich (${esc(rt.source || "")})">◎ ${esc(fmtDateTimeShort(rt.timestamp))} · ${esc(ringInfo)}${esc(diffTxt)}</div>`;
       }
+      const dp = p.data_points || {};
+      const dpTot = Number(dp.total) || 0;
+      const dpIvs = Number(dp.intervals_total) || 0;
+      const dpParts = [];
+      if (p.has_weekly) dpParts.push(`Wk ${Number(dp.weekly) || 0}`);
+      if (p.has_5h) dpParts.push(`5h ${Number(dp.h5) || 0}`);
+      const br = dp.burn_rate || {};
+      const brMain = br.weekly_pct_per_1k_cu != null
+        ? ` · Burn ~${Number(br.weekly_pct_per_1k_cu).toFixed(2)}%/1k CU`
+        : (br.h5_pct_per_1k_cu != null ? ` · 5h-Burn ~${Number(br.h5_pct_per_1k_cu).toFixed(2)}%/1k CU` : "");
+      const dpIcon = dpIvs >= 1 ? "●" : (dpTot >= 1 ? "◐" : "○");
+      const dpCls = dpIvs >= 1 ? "ready" : (dpTot >= 1 ? "partial" : "empty");
+      const dpHtml = `<div class="pool-dp-meta ${dpCls}" title="Gespeicherte t_i-Snapshots für Burn-Rate-Regression (${esc(dpParts.join(" · "))})">${dpIcon} ${dpTot} Datenpunkt${dpTot === 1 ? "" : "e"}${dpParts.length ? ` (${esc(dpParts.join(" · "))})` : ""}${dpIvs > 0 ? ` · ${dpIvs} Int.` : ""}${esc(brMain)}</div>`;
+
       return `
       <div class="usage-pool-card">
         <div class="usage-pool-title">
@@ -952,6 +987,7 @@ function renderDashboardHeader() {
         </div>
         ${renderHorizonLine("Weekly limit", p.weekly, p.color)}
         ${renderHorizonLine("5h limit", p.h5, p.color)}
+        ${dpHtml}
         ${rtHtml}
       </div>`;
     })

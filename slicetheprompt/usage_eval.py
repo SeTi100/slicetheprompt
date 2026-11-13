@@ -275,6 +275,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     },
 }
 
+MAX_RING_HISTORY = 2000
+
 
 def load_calibration(cal_path: Path | None = None) -> dict[str, Any]:
     """Lädt lokale Kalibrierung & Einstellungen und ergänzt fehlende Standardfelder."""
@@ -308,7 +310,7 @@ def load_calibration(cal_path: Path | None = None) -> dict[str, Any]:
             **base,
             **{k: v for k, v in ov.items() if v is not None},
         }
-        merged["ring_history"] = list(merged.get("ring_history") or [])[-100:]
+        merged["ring_history"] = list(merged.get("ring_history") or [])[-MAX_RING_HISTORY:]
         cfg["pools"][pid] = merged
     return cfg
 
@@ -871,6 +873,88 @@ def evaluate_conversation_turns(
 # Account-Pools (5h + Weekly) & Anker-Kalibrierung
 # -----------------------------------------------------------------------------
 
+def _summarize_pool_data_points(
+    pool_id: str,
+    pool_cfg: dict[str, Any],
+    all_requests: list[tuple[dt.datetime, str, ModelSpec, CostBreakdown]],
+) -> dict[str, Any]:
+    """Zählt gespeicherte diskrete Snapshot-Datenpunkte und berechnet Intervall-Burn-Rates."""
+    hist = pool_cfg.get("ring_history") or []
+    by_h: dict[str, list[dict[str, Any]]] = {"weekly": [], "5h": []}
+    last_ts_dt: dt.datetime | None = None
+    last_ts_iso: str | None = None
+
+    for entry in hist:
+        if not isinstance(entry, dict):
+            continue
+        hk = entry.get("horizon")
+        if hk not in by_h:
+            continue
+        ts_dt = _parse_utc(entry.get("ts"))
+        if ts_dt is None or entry.get("pct_left") is None:
+            continue
+        if last_ts_dt is None or ts_dt > last_ts_dt:
+            last_ts_dt = ts_dt
+            last_ts_iso = ts_dt.isoformat()
+        by_h[hk].append({
+            "ts": ts_dt,
+            "pct_left": float(entry["pct_left"]),
+            "resets_at": _parse_utc(entry.get("resets_at")),
+        })
+
+    pool_reqs = [(ts, c.cu) for ts, pid, _, c in all_requests if pid == pool_id]
+    stats: dict[str, dict[str, Any]] = {}
+    for hk, win_h in (("weekly", 168.0), ("5h", 5.0)):
+        pts = sorted(by_h[hk], key=lambda x: x["ts"])
+        ivs = 0
+        sum_dpct = 0.0
+        sum_cu = 0.0
+        sum_dt_h = 0.0
+        reset_tol_sec = 7200.0 if hk == "weekly" else 1200.0
+        for idx in range(len(pts) - 1):
+            p0, p1 = pts[idx], pts[idx + 1]
+            dt_h = (p1["ts"] - p0["ts"]).total_seconds() / 3600.0
+            if dt_h <= 0.0:
+                continue
+            r0, r1 = p0["resets_at"], p1["resets_at"]
+            if r0 is not None and r1 is not None:
+                same_cycle = abs((r1 - r0).total_seconds()) <= reset_tol_sec
+            else:
+                same_cycle = dt_h < win_h and p1["pct_left"] <= p0["pct_left"] + 0.5
+            if not same_cycle:
+                continue
+            ivs += 1
+            dpct = p0["pct_left"] - p1["pct_left"]
+            if dpct > 0.0:
+                iv_cu = sum(cu for r_ts, cu in pool_reqs if p0["ts"] < r_ts <= p1["ts"])
+                if iv_cu > 0.0:
+                    sum_dpct += dpct
+                    sum_cu += iv_cu
+                    sum_dt_h += dt_h
+        stats[hk] = {
+            "points": len(pts),
+            "intervals": ivs,
+            "pct_per_1k_cu": round(sum_dpct / (sum_cu / 1000.0), 2) if sum_cu > 0.0 else None,
+            "pct_per_h": round(sum_dpct / sum_dt_h, 2) if sum_dt_h > 0.01 and sum_dpct > 0.0 else None,
+        }
+
+    return {
+        "total": stats["weekly"]["points"] + stats["5h"]["points"],
+        "weekly": stats["weekly"]["points"],
+        "h5": stats["5h"]["points"],
+        "intervals_total": stats["weekly"]["intervals"] + stats["5h"]["intervals"],
+        "intervals_weekly": stats["weekly"]["intervals"],
+        "intervals_5h": stats["5h"]["intervals"],
+        "last_ts": last_ts_iso,
+        "burn_rate": {
+            "weekly_pct_per_1k_cu": stats["weekly"]["pct_per_1k_cu"],
+            "h5_pct_per_1k_cu": stats["5h"]["pct_per_1k_cu"],
+            "weekly_pct_per_h": stats["weekly"]["pct_per_h"],
+            "h5_pct_per_h": stats["5h"]["pct_per_h"],
+        },
+    }
+
+
 def _compute_pool_status(
     pool_id: str,
     pool_cfg: dict[str, Any],
@@ -991,6 +1075,7 @@ def _compute_pool_status(
         "h5": h5,
         "weekly": hw,
         "ring_tracking": ring_tracking,
+        "data_points": _summarize_pool_data_points(pool_id, pool_cfg, all_requests),
     }
 
 
@@ -1049,6 +1134,11 @@ def calibrate_pool_snapshot(
         recent_ids = list_recent_conversation_ids(win_start_est - dt.timedelta(hours=24), base)
 
         consumed_in_win = 0.0
+        reqs_in_win = 0
+        fresh_in_win = 0
+        cache_read_in_win = 0
+        output_in_win = 0
+        thinking_in_win = 0
         overrides = cfg.get("custom_models") or {}
         for cid in recent_ids:
             cdata = load_conversation(cid, base, summaries)
@@ -1061,6 +1151,11 @@ def calibrate_pool_snapshot(
                         consumed_in_win += compute_token_cost(
                             r.fresh_in, r.cache_read, r.output_total, r.thinking_tokens, r.visible_output, spec, cfg
                         ).cu
+                        reqs_in_win += 1
+                        fresh_in_win += int(r.fresh_in or 0)
+                        cache_read_in_win += int(r.cache_read or 0)
+                        output_in_win += int(r.output_total or 0)
+                        thinking_in_win += int(r.thinking_tokens or 0)
 
         used_pct = 100.0 - pct_left_clamped
         # Empirische Kapazitäts-Ableitung wenn sinnvolle Daten vorliegen (z. B. > 20 CU verbraucht)
@@ -1089,24 +1184,30 @@ def calibrate_pool_snapshot(
 
         p_cfg[f"anchor_{horizon}"] = anchor_data
 
-        if ring_pct is not None or src_clean != "manual":
-            hist = list(p_cfg.get("ring_history") or [])
-            hist_entry: dict[str, Any] = {
-                "ts": now.isoformat(),
-                "horizon": horizon,
-                "pct_left": round(pct_left_clamped, 2),
-                "source": src_clean,
-            }
-            if ring_pct is not None:
-                hist_entry["ring_pct"] = round(float(ring_pct), 1)
-            if ring_color is not None:
-                hist_entry["ring_color"] = str(ring_color)
-            if ocr_pct is not None:
-                hist_entry["ocr_pct"] = round(float(ocr_pct), 1)
-            if ring_pct is not None and ocr_pct is not None:
-                hist_entry["ocr_ring_diff"] = round(float(ocr_pct) - float(ring_pct), 1)
-            hist.append(hist_entry)
-            p_cfg["ring_history"] = hist[-100:]
+        hist = list(p_cfg.get("ring_history") or [])
+        hist_entry: dict[str, Any] = {
+            "ts": now.isoformat(),
+            "horizon": horizon,
+            "pct_left": round(pct_left_clamped, 2),
+            "resets_at": resets_at_dt.isoformat(),
+            "cu_in_win": round(consumed_in_win, 1),
+            "reqs_in_win": reqs_in_win,
+            "fresh_in_win": fresh_in_win,
+            "cache_read_in_win": cache_read_in_win,
+            "output_in_win": output_in_win,
+            "thinking_in_win": thinking_in_win,
+            "source": src_clean,
+        }
+        if ring_pct is not None:
+            hist_entry["ring_pct"] = round(float(ring_pct), 1)
+        if ring_color is not None:
+            hist_entry["ring_color"] = str(ring_color)
+        if ocr_pct is not None:
+            hist_entry["ocr_pct"] = round(float(ocr_pct), 1)
+        if ring_pct is not None and ocr_pct is not None:
+            hist_entry["ocr_ring_diff"] = round(float(ocr_pct) - float(ring_pct), 1)
+        hist.append(hist_entry)
+        p_cfg["ring_history"] = hist[-MAX_RING_HISTORY:]
 
     save_calibration(cfg, cal_path)
     return cfg
@@ -1546,6 +1647,9 @@ def build_usage_overview(
 
     plot_data = _build_fading_volume_plot(all_requests, pools_status, now, days=min(days, 7.0))
 
+    dp_total = sum((p.get("data_points") or {}).get("total", 0) for p in pools_status.values())
+    dp_intervals = sum((p.get("data_points") or {}).get("intervals_total", 0) for p in pools_status.values())
+
     return {
         "ok": True,
         "generated_at": now.isoformat(),
@@ -1556,6 +1660,10 @@ def build_usage_overview(
             "custom_models": cfg.get("custom_models", {}),
         },
         "pools": pools_status,
+        "data_points_summary": {
+            "total_points": dp_total,
+            "total_intervals": dp_intervals,
+        },
         "reference_part_cu": round(ref_part_cu, 1),
         "fading_plot": plot_data,
         "workspaces": ws_list,
