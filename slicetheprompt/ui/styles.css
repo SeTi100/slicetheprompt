@@ -1561,3 +1561,11 @@ button {
 .burn-src-tag.prior { background: rgba(148, 163, 184, 0.14); color: var(--text-muted); }
 .burn-src-tag.empirical { background: rgba(16, 185, 129, 0.16); color: #86efac; }
 .burn-prof-cell { font-family: var(--mono); font-size: 11px; white-space: nowrap; }
+
+.dev-mode-toggle {
+  display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px;
+  border-radius: 6px; border: 1px solid var(--border); background: rgba(15, 23, 42, 0.55);
+  font-size: 11px; color: var(--text-muted); cursor: pointer; user-select: none;
+}
+.dev-mode-toggle input { margin: 0; accent-color: var(--accent); cursor: pointer; }
+.dev-mode-toggle.active { border-color: rgba(139, 92, 246, 0.55); background: rgba(139, 92, 246, 0.14); color: #ddd6fe; }

@@ -20,6 +20,7 @@ const state = {
   selectedKind: "project", // "project" | "conversation"
   selectedId: null,
   calibrationOpen: false,
+  devMode: new URLSearchParams(window.location.search).get("dev") === "1" || (typeof localStorage !== "undefined" && localStorage.getItem("stp_usage_dev") === "1"),
   burnFilterPool: "all",
   burnFilterHorizon: "both",
   lightboxImg: null,
@@ -620,7 +621,9 @@ function _renderCalSlotField(p, horizon, labelText, placeholderText, existingHor
   const brTxt = brVal != null ? ` · ~${Number(brVal).toFixed(2)}%/1k CU` : "";
   const dpClass = dpCount >= 2 ? "ready" : (dpCount === 1 ? "partial" : "empty");
   const dpTitle = `Gespeicherte Zeitpunkte (t_i) für ${p.label} (${horizon}): ${dpCount} · Auswertbare Burn-Rate-Intervalle [t_i, t_{i+1}]: ${ivCount}`;
-  const dpPill = `<span class="cal-dp-pill ${dpClass}" title="${esc(dpTitle)}">${dpCount} Pkt${ivCount > 0 ? ` · ${ivCount} Int.` : ""}${esc(brTxt)}</span>`;
+  const dpPill = state.devMode
+    ? `<span class="cal-dp-pill ${dpClass}" title="${esc(dpTitle)}">${dpCount} Pkt${ivCount > 0 ? ` · ${ivCount} Int.` : ""}${esc(brTxt)}</span>`
+    : "";
 
   return `
     <div class="cal-field-wrap">
@@ -661,7 +664,7 @@ function renderCalibrationDrawer() {
       .map((w) => `<div class="cal-ss-warn">⚠ ${esc(w.message || w.code)}</div>`)
       .join("");
     const selM = ssRes.selected_model;
-    const selHtml = selM
+    const selHtml = (state.devMode && selM)
       ? `<div class="cal-ss-selected">🎯 <strong>Gewählt (OCR):</strong> ${esc(selM.name)}${selM.effort ? ` · <span class="effort-pill">${esc(selM.effort)}</span>` : ""}</div>`
       : "";
     ssStatusHtml = `
@@ -676,11 +679,13 @@ function renderCalibrationDrawer() {
   const totPts = Number(dps.total_points) || 0;
   const totIvs = Number(dps.total_intervals) || 0;
   const dpSumCls = totIvs >= 1 ? "ready" : (totPts >= 1 ? "partial" : "empty");
-  const dpSumHtml = `
+  const dpSumHtml = state.devMode
+    ? `
     <div class="cal-dp-summary ${dpSumCls}" title="Jeder gespeicherte Screenshot liefert diskrete Zeitpunkte t_i je Pool/Horizont zur Berechnung der mehrdimensionalen Usage-Burn-Rate.">
       <span>📊 <strong>Datenbasis:</strong> ${totPts} Datenpunkt${totPts === 1 ? "" : "e"} · ${totIvs} Burn-Rate-Intervall${totIvs === 1 ? "" : "e"}</span>
       <span class="cal-dp-hint">${totPts === 0 ? "Ersten Screenshot einfügen &amp; speichern" : (totIvs === 0 ? "Noch 1 weiterer Snapshot im selben Reset-Zyklus für erstes Intervall" : "Jeder weitere Screenshot verfeinert das Modell")}</span>
-    </div>`;
+    </div>`
+    : "";
 
   const dropZoneHtml = `
     ${dpSumHtml}
@@ -958,10 +963,12 @@ function renderBurnMatrix() {
   if (!host) return;
   const ov = state.overview;
   const rows = ov?.burn_matrix;
-  if (!ov || !Array.isArray(rows) || !rows.length) {
+  if (!state.devMode || !ov || !Array.isArray(rows) || !rows.length) {
+    host.classList.add("hidden");
     host.innerHTML = "";
     return;
   }
+  host.classList.remove("hidden");
 
   const pools = ov.pools || {};
   const poolBtns = [
@@ -1102,7 +1109,7 @@ function renderDashboardHeader() {
     .map((p) => {
       const rt = p.ring_tracking;
       let rtHtml = "";
-      if (rt && rt.timestamp) {
+      if (state.devMode && rt && rt.timestamp) {
         const diffTxt = rt.diff_pct != null ? ` · Δ ${Math.abs(Number(rt.diff_pct)).toFixed(1)}%` : "";
         const ringInfo = rt.ring_pct != null
           ? `Ring ${Number(rt.ring_pct).toFixed(0)}% (${ringColorLabel(rt.ring_color)})`
@@ -1121,7 +1128,9 @@ function renderDashboardHeader() {
         : (br.h5_pct_per_1k_cu != null ? ` · 5h-Burn ~${Number(br.h5_pct_per_1k_cu).toFixed(2)}%/1k CU` : "");
       const dpIcon = dpIvs >= 1 ? "●" : (dpTot >= 1 ? "◐" : "○");
       const dpCls = dpIvs >= 1 ? "ready" : (dpTot >= 1 ? "partial" : "empty");
-      const dpHtml = `<div class="pool-dp-meta ${dpCls}" title="Gespeicherte t_i-Snapshots für Burn-Rate-Regression (${esc(dpParts.join(" · "))})">${dpIcon} ${dpTot} Datenpunkt${dpTot === 1 ? "" : "e"}${dpParts.length ? ` (${esc(dpParts.join(" · "))})` : ""}${dpIvs > 0 ? ` · ${dpIvs} Int.` : ""}${esc(brMain)}</div>`;
+      const dpHtml = state.devMode
+        ? `<div class="pool-dp-meta ${dpCls}" title="Gespeicherte t_i-Snapshots für Burn-Rate-Regression (${esc(dpParts.join(" · "))})">${dpIcon} ${dpTot} Datenpunkt${dpTot === 1 ? "" : "e"}${dpParts.length ? ` (${esc(dpParts.join(" · "))})` : ""}${dpIvs > 0 ? ` · ${dpIvs} Int.` : ""}${esc(brMain)}</div>`
+        : "";
 
       return `
       <div class="usage-pool-card">
@@ -1138,7 +1147,7 @@ function renderDashboardHeader() {
     .join("");
 
   const am = ov.active_model;
-  const activeModelHtml = am
+  const activeModelHtml = (state.devMode && am)
     ? `<span class="active-model-pill" title="Zuletzt aus Antigravity-Logs gelesenes Modell + Effort (${esc(fmtDateTimeShort(am.timestamp))})">🧠 Aktiv: <strong>${esc(am.model_name)}</strong>${am.effort ? ` <span class="effort-pill">${esc(am.effort)}</span>` : ""}</span>`
     : "";
 
@@ -1628,6 +1637,18 @@ export function initUsageUI({ onOpenProjectVersion, getCurrentProject } = {}) {
         renderDashboardHeader();
         renderWorkspaceTree();
         if (state.selectedId) await loadUsageDetail(state.selectedKind, state.selectedId);
+      });
+    }
+    const devToggle = document.getElementById("toggle-usage-dev");
+    if (devToggle) {
+      devToggle.checked = !!state.devMode;
+      devToggle.closest(".dev-mode-toggle")?.classList.toggle("active", !!state.devMode);
+      devToggle.addEventListener("change", () => {
+        state.devMode = !!devToggle.checked;
+        try { localStorage.setItem("stp_usage_dev", state.devMode ? "1" : "0"); } catch {}
+        devToggle.closest(".dev-mode-toggle")?.classList.toggle("active", state.devMode);
+        renderDashboardHeader();
+        renderCalibrationDrawer();
       });
     }
     if (lbClose && lb) {
