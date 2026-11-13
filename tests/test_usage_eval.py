@@ -384,6 +384,12 @@ def test_data_points_intervals_and_burn_rate():
         assert dp["burn_rate"]["weekly_pct_per_1k_cu"] > 0
         assert ov["data_points_summary"]["total_points"] == 3
         assert ov["data_points_summary"]["total_intervals"] == 1
+        assert ov["active_model"] is not None
+        assert ov["active_model"]["effort"] in ("Medium", "High", "Low", "XHigh")
+
+        assert UE.extract_model_effort("Gemini 4 Hydrogen (XHigh)", "", "") == "XHigh"
+        assert UE.extract_model_effort("", "", "MODEL_PLACEHOLDER_M528") == "XHigh"
+        assert UE.extract_model_effort("", "", "MODEL_PLACEHOLDER_M318") == "High"
 
 
 def run_all() -> None:

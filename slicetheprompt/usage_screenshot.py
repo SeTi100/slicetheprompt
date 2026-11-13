@@ -695,6 +695,54 @@ def parse_model_column(
     return models
 
 
+def extract_selected_model(
+    left_tokens: list[OcrToken],
+    custom_models: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """Erkennt das aktuell im UI gewählte Modell samt Effort-Stufe (z. B. unter 'View Usage' oder per '✓')."""
+    if not left_tokens:
+        return None
+    lines = _group_tokens_by_y(left_tokens)
+    after_view_usage = False
+    fallback_checked: dict[str, Any] | None = None
+
+    for line in lines:
+        raw = " ".join(t.text for t in line).strip()
+        raw_low = raw.lower()
+        if "view" in raw_low and "usage" in raw_low:
+            after_view_usage = True
+            continue
+        if after_view_usage:
+            if any(skip in raw_low or _compact(skip) in _compact(raw_low) for skip in _SKIP_LEFT_PHRASES):
+                continue
+            clean_name, tier, _, _ = _clean_model_line(raw)
+            if len(clean_name) >= 3 and re.search(r"[a-zA-Z]{2,}", clean_name):
+                slug = _slugify_model(clean_name)
+                _, known_pool = _is_known_model(clean_name, slug, custom_models)
+                sug_pool, _, _ = _suggest_model_defaults(clean_name)
+                return {
+                    "name": clean_name,
+                    "effort": tier,
+                    "display": f"{clean_name} ({tier})" if tier else clean_name,
+                    "pool_id": known_pool or sug_pool,
+                    "source": "ocr_selector",
+                }
+        elif fallback_checked is None and ("✓" in raw or "✔" in raw):
+            clean_name, tier, _, _ = _clean_model_line(raw)
+            if len(clean_name) >= 3 and re.search(r"[a-zA-Z]{2,}", clean_name):
+                slug = _slugify_model(clean_name)
+                _, known_pool = _is_known_model(clean_name, slug, custom_models)
+                sug_pool, _, _ = _suggest_model_defaults(clean_name)
+                fallback_checked = {
+                    "name": clean_name,
+                    "effort": tier,
+                    "display": f"{clean_name} ({tier})" if tier else clean_name,
+                    "pool_id": known_pool or sug_pool,
+                    "source": "ocr_checkmark",
+                }
+    return fallback_checked
+
+
 # -----------------------------------------------------------------------------
 # Rechte Usage-Spalte: Zustandsautomat + Ring-Fusion
 # -----------------------------------------------------------------------------
@@ -1090,6 +1138,7 @@ def parse_usage_screenshot(
         method = "ocr+ring_fallback"
 
     detected_models = parse_model_column(left_tokens, custom_models)
+    selected_model = extract_selected_model(left_tokens, custom_models)
 
     return {
         "ok": True,
@@ -1102,5 +1151,6 @@ def parse_usage_screenshot(
         "snapshots": snapshots,
         "rings": rings,
         "detected_models": detected_models,
+        "selected_model": selected_model,
         "warnings": warnings,
     }

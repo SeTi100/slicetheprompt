@@ -658,8 +658,13 @@ function renderCalibrationDrawer() {
     const warns = (ssRes.warnings || [])
       .map((w) => `<div class="cal-ss-warn">⚠ ${esc(w.message || w.code)}</div>`)
       .join("");
+    const selM = ssRes.selected_model;
+    const selHtml = selM
+      ? `<div class="cal-ss-selected">🎯 <strong>Gewählt (OCR):</strong> ${esc(selM.name)}${selM.effort ? ` · <span class="effort-pill">${esc(selM.effort)}</span>` : ""}</div>`
+      : "";
     ssStatusHtml = `
       <span class="cal-ss-status ok">✓ ${esc(engineTxt)} · ${ringCnt} Ringe · ${snapCnt} Werte erkannt</span>
+      ${selHtml}
       ${warns}`;
   } else {
     ssStatusHtml = `<span class="cal-ss-status muted">Tipp: Antigravity-Popover mit Win+Shift+S kopieren &amp; hier per Strg+V einfügen.</span>`;
@@ -875,9 +880,13 @@ function renderCalibrationDrawer() {
         }
       }
     }
+    const selM = state.screenshot.result?.selected_model;
+    const activeM = ov.active_model;
     const payload = {
       days: 14,
       snapshots,
+      selected_model: selM?.name || activeM?.model_name || "",
+      selected_effort: selM?.effort || activeM?.effort || "",
       settings: {
         show_eco_metrics: !!document.getElementById("cal-eco-toggle")?.checked,
         currency: document.getElementById("cal-currency")?.value || "CHF",
@@ -993,12 +1002,18 @@ function renderDashboardHeader() {
     })
     .join("");
 
+  const am = ov.active_model;
+  const activeModelHtml = am
+    ? `<span class="active-model-pill" title="Zuletzt aus Antigravity-Logs gelesenes Modell + Effort (${esc(fmtDateTimeShort(am.timestamp))})">🧠 Aktiv: <strong>${esc(am.model_name)}</strong>${am.effort ? ` <span class="effort-pill">${esc(am.effort)}</span>` : ""}</span>`
+    : "";
+
   host.innerHTML = `
     <div class="usage-top-grid">
       <div class="usage-pools-grid">${poolCards}</div>
       <div class="usage-plot-card">
         ${renderFadingPlotSvg(ov)}
         <div class="usage-top-tools">
+          ${activeModelHtml}
           <label class="eco-inline-toggle">
             <input type="checkbox" id="quick-eco-toggle" ${s.show_eco_metrics ? "checked" : ""} />
             <span>⚡ Energie & 💧 Wasser anzeigen</span>
@@ -1275,7 +1290,7 @@ function renderChatDetail(det) {
           data-tokens="${ac.total_tokens || 0}" data-wh="${ac.energy_wh || 0}" data-ml="${ac.water_ml || 0}">
           <div class="bubble bubble-ai">
             <div class="bubble-meta-top">
-              <span class="model-pill">${esc(t.model_display)}</span>
+              <span class="model-pill">${esc(t.model_display)}${t.effort ? ` <span class="effort-pill">${esc(t.effort)}</span>` : ""}</span>
               <span class="chat-chips-inline">
                 <span class="chat-chip">${t.planner_calls} Calls</span>
                 <span class="chat-chip">Cache ${Number(t.cache_hit_pct || 0).toFixed(0)}%</span>

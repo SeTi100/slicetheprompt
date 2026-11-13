@@ -321,12 +321,36 @@ def test_ocr_ring_mismatch_and_correction():
     assert len(mismatch_warns) == 2
 
 
+def test_selected_model_and_effort_extraction():
+    img = build_synthetic_usage_screenshot(two_column=True)
+    def _bx(x0, y0, x1, y1, txt):
+        return ([[x0, y0], [x1, y0], [x1, y1], [x0, y1]], txt, 0.99)
+    ocr_boxes = [
+        _bx(12, 24, 180, 40, "Gemini 4 Hydrogen Extra"),
+        _bx(12, 168, 130, 182, "View Usage"),
+        _bx(12, 200, 195, 214, "Gemini 4 Hydrogen Extra ^"),
+        _bx(300, 20, 360, 32, "Usage"),
+        _bx(300, 42, 410, 56, "Gemini Models"),
+        _bx(300, 62, 385, 75, "Weekly limit"),
+        _bx(520, 62, 570, 75, "61% left"),
+    ]
+    with tempfile.TemporaryDirectory() as td:
+        cal = Path(td) / "usage_calibration.yaml"
+        res = US.parse_usage_screenshot(img, cal_path=cal, ocr_boxes=ocr_boxes)
+    sel = res.get("selected_model")
+    assert sel is not None
+    assert sel["name"] == "Gemini 4 Hydrogen"
+    assert sel["effort"] == "Extra"
+    assert sel["pool_id"] == "gemini"
+
+
 def run_all() -> None:
     tests = [
         test_ring_tracker_accuracy_all_levels,
         test_full_screenshot_ocr_ring_and_models,
         test_empty_ocr_ring_fallback,
         test_ocr_ring_mismatch_and_correction,
+        test_selected_model_and_effort_extraction,
     ]
     for fn in tests:
         fn()

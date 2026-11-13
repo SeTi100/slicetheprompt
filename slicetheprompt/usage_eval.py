@@ -197,6 +197,38 @@ MODEL_ENUM_MAP: dict[str, str] = {
     "MODEL_PLACEHOLDER_M528": "hydrogen",
 }
 
+MODEL_ENUM_EFFORT_MAP: dict[str, str] = {
+    "MODEL_PLACEHOLDER_M318": "High",
+    "MODEL_PLACEHOLDER_M319": "Medium",
+    "MODEL_PLACEHOLDER_M320": "Low",
+    "MODEL_PLACEHOLDER_M401": "Medium",
+    "MODEL_PLACEHOLDER_M418": "Medium",
+    "MODEL_PLACEHOLDER_M526": "Medium",
+    "MODEL_PLACEHOLDER_M528": "XHigh",
+}
+
+
+def extract_model_effort(
+    model_display: str = "",
+    model_slug: str = "",
+    model_enum: str = "",
+) -> str:
+    """Extrahiert die Thinking-/Effort-Stufe (Low, Medium, High, XHigh, Extra) aus den Modell-Metadaten."""
+    for src in (model_display, model_slug):
+        if not src:
+            continue
+        m = re.search(r"\b(XHigh|Extra|Medium|High|Low)\b", src, re.IGNORECASE)
+        if m:
+            raw = m.group(1).lower()
+            return {
+                "xhigh": "XHigh",
+                "extra": "Extra",
+                "high": "High",
+                "medium": "Medium",
+                "low": "Low",
+            }.get(raw, m.group(1))
+    return MODEL_ENUM_EFFORT_MAP.get(model_enum, "")
+
 
 def resolve_model_spec(
     model_display: str = "",
@@ -692,6 +724,7 @@ class EvaluatedTurn:
     context_used: int
     context_limit: int
     versions: list[dict[str, Any]] = field(default_factory=list)
+    effort: str = ""
 
 
 def evaluate_conversation_turns(
@@ -779,6 +812,11 @@ def evaluate_conversation_turns(
             else MODEL_SPECS["hydrogen"]
         )
         model_display = (lead_req.model_display if lead_req and lead_req.model_display else spec.display_name)
+        effort = (
+            extract_model_effort(lead_req.model_display, lead_req.model_slug, lead_req.model_enum)
+            if lead_req
+            else ""
+        )
 
         p_cost = CostBreakdown()
         a_cost = CostBreakdown()
@@ -841,6 +879,7 @@ def evaluate_conversation_turns(
                 model_key=spec.key,
                 model_display=model_display,
                 pool_id=spec.pool_id,
+                effort=effort,
                 planner_calls=len(t_reqs),
                 subagent_calls=sub_calls,
                 subagent_ids=spawned_ids,
@@ -1042,6 +1081,8 @@ def _compute_pool_status(
                 "ocr_pct": last_rt.get("ocr_pct"),
                 "diff_pct": diff_val,
                 "source": last_rt.get("source"),
+                "selected_model": last_rt.get("selected_model"),
+                "selected_effort": last_rt.get("selected_effort"),
                 "timestamp": last_rt.get("ts"),
             }
     if ring_tracking is None:
@@ -1107,6 +1148,8 @@ def calibrate_pool_snapshot(
     ring_color: str | None = None,
     ocr_pct: float | None = None,
     source: str = "manual",
+    selected_model: str | None = None,
+    selected_effort: str | None = None,
 ) -> dict[str, Any]:
     """Speichert eine Kalibrierung (Rest-% + Reset-Timer) und leitet ggf. die reale Kapazität ab."""
     cfg = load_calibration(cal_path)
@@ -1206,6 +1249,10 @@ def calibrate_pool_snapshot(
             hist_entry["ocr_pct"] = round(float(ocr_pct), 1)
         if ring_pct is not None and ocr_pct is not None:
             hist_entry["ocr_ring_diff"] = round(float(ocr_pct) - float(ring_pct), 1)
+        if selected_model:
+            hist_entry["selected_model"] = str(selected_model)
+        if selected_effort:
+            hist_entry["selected_effort"] = str(selected_effort)
         hist.append(hist_entry)
         p_cfg["ring_history"] = hist[-MAX_RING_HISTORY:]
 
@@ -1443,6 +1490,7 @@ def _turn_to_dict(
         "model_key": t.model_key,
         "model_display": t.model_display,
         "pool_id": t.pool_id,
+        "effort": t.effort,
         "planner_calls": t.planner_calls,
         "subagent_calls": t.subagent_calls,
         "subagent_ids": t.subagent_ids,
@@ -1480,6 +1528,8 @@ def build_usage_overview(
     all_requests: list[tuple[dt.datetime, str, ModelSpec, CostBreakdown]] = []
     # Root-Konversationen (keine Subagenten!) für Workspace- & Teile-Ansicht
     root_convs: list[str] = []
+    latest_req_info: dict[str, Any] | None = None
+    latest_req_ts: dt.datetime | None = None
     for cid in recent_ids:
         s = summaries.get(cid)
         if s and s.parent_conversation_id:
@@ -1504,6 +1554,17 @@ def build_usage_overview(
                         req.thinking_tokens, req.visible_output, spec, cfg,
                     )
                     all_requests.append((req.timestamp, spec.pool_id, spec, cost))
+                    if latest_req_ts is None or req.timestamp > latest_req_ts:
+                        latest_req_ts = req.timestamp
+                        eff = extract_model_effort(req.model_display, req.model_slug, req.model_enum)
+                        disp = req.model_display or (f"{spec.display_name} ({eff})" if eff else spec.display_name)
+                        latest_req_info = {
+                            "model_name": spec.display_name,
+                            "model_display": disp,
+                            "effort": eff,
+                            "pool_id": spec.pool_id,
+                            "timestamp": req.timestamp.isoformat(),
+                        }
             stack.extend(children_map.get(cur, []))
 
     pools_status = {
@@ -1660,6 +1721,7 @@ def build_usage_overview(
             "custom_models": cfg.get("custom_models", {}),
         },
         "pools": pools_status,
+        "active_model": latest_req_info,
         "data_points_summary": {
             "total_points": dp_total,
             "total_intervals": dp_intervals,

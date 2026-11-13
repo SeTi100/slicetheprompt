@@ -1173,6 +1173,8 @@ class StudioHandler(BaseHTTPRequestHandler):
                             ring_color=str(sn["ring_color"]) if sn.get("ring_color") else None,
                             ocr_pct=_opt_pct(sn.get("ocr_pct")),
                             source=str(sn.get("source") or "manual"),
+                            selected_model=str(sn.get("selected_model") or body.get("selected_model") or "") or None,
+                            selected_effort=str(sn.get("selected_effort") or body.get("selected_effort") or "") or None,
                         )
 
                 days = float(body.get("days") or 14.0)
