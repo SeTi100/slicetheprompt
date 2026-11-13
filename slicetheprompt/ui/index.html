@@ -25,7 +25,10 @@
             <div class="brand-sub">Creality Hi · 3D-Prüfstand</div>
           </div>
         </div>
-        <span id="sse-indicator" class="live-dot" title="Live-Synchronisation aktiv"></span>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <button id="btn-open-usage" class="btn-xs" title="Antigravity Usage, Limits & Chat-Timeline">⚡ Usage</button>
+          <span id="sse-indicator" class="live-dot" title="Live-Synchronisation aktiv"></span>
+        </div>
       </div>
 
       <div class="section-block">
@@ -341,6 +344,14 @@
 
         <div class="pane-section">
           <div class="section-header">
+            <span>KI-Entwicklung &amp; Usage (Antigravity)</span>
+            <button id="btn-ai-cost-reload" class="btn-xs" title="KI-Kosten neu auswerten">↻</button>
+          </div>
+          <div id="ai-part-cost-box" class="spec-details"><span class="status-muted">Wird ausgewertet …</span></div>
+        </div>
+
+        <div class="pane-section">
+          <div class="section-header">
             <span>Drucker-Details (Moonraker)</span>
             <button id="btn-details-reload" class="btn-xs" title="Neu abfragen">↻</button>
           </div>
@@ -357,6 +368,7 @@
         <span id="printer-temps-text" class="status-muted"></span>
       </div>
       <div id="cfs-slots-bar" class="cfs-bar"></div>
+      <div id="usage-status-pill" class="usage-status-pill" role="button" tabindex="0" title="Antigravity Limits & Chat-Timeline öffnen">⚡ Quota …</div>
       <div class="status-right">
         <span class="safety-note">🔒 Rein lesend – Druckstart nur im Chat</span>
       </div>
@@ -377,6 +389,52 @@
         <span id="diff-meta-delta" class="mono-dim"></span>
       </div>
       <pre id="diff-content" class="diff-viewer"></pre>
+    </div>
+  </div>
+
+  <!-- ==================== USAGE & CHAT TIMELINE MODAL ==================== -->
+  <div id="usage-modal" class="modal-backdrop hidden">
+    <div class="usage-modal-card">
+      <div class="usage-modal-header">
+        <div class="usage-title-wrap">
+          <span class="usage-badge-icon">⚡</span>
+          <div>
+            <h3>Antigravity Usage, Quota-Pools &amp; CAD-Chat-Timeline</h3>
+            <div class="usage-subtitle">Getrennte Limits (5h &amp; Weekly) über alle Workspaces · Telefon-Chat-Verlauf mit Iso-Iterationen &amp; Scroll-Summenlinie</div>
+          </div>
+        </div>
+        <div class="usage-head-actions">
+          <label class="dev-mode-toggle" title="Erweiterte Entwickler-Analyse ein-/ausblenden (Burn-Matrix, Datenpunkte, Ring-Telemetrie)">
+            <input type="checkbox" id="toggle-usage-dev" />
+            <span>🛠️ Dev-Ansicht</span>
+          </label>
+          <button id="btn-usage-reload" class="btn-xs" title="Daten neu einlesen">↻ Aktualisieren</button>
+          <button id="btn-usage-close" class="icon-btn" title="Schliessen">✕</button>
+        </div>
+      </div>
+
+      <div id="usage-top-area" class="usage-top-area"></div>
+      <div id="usage-cal-drawer" class="usage-cal-drawer hidden"></div>
+      <div id="usage-burn-matrix" class="usage-burn-matrix"></div>
+
+      <div class="usage-body-split">
+        <aside class="usage-left-col">
+          <div class="usage-col-head">Workspaces · Teile &amp; Chats</div>
+          <div id="usage-ws-tree" class="usage-ws-tree"></div>
+        </aside>
+        <main id="usage-chat-pane" class="usage-chat-pane"></main>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== ISO LIGHTBOX MODAL ==================== -->
+  <div id="iso-lightbox" class="modal-backdrop hidden">
+    <div class="iso-lb-card">
+      <div class="iso-lb-head">
+        <span id="iso-lightbox-cap">Studio Iso-Ansicht</span>
+        <button id="btn-iso-lb-close" class="icon-btn">✕</button>
+      </div>
+      <img id="iso-lightbox-img" alt="CAD Iso Vorschau" class="iso-lb-img" />
     </div>
   </div>
 

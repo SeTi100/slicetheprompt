@@ -18,3 +18,4 @@ projects/*/out/
 !projects/*/out/.gitkeep
 projects/*/history/
 config/preise.yaml
+config/usage_calibration.yaml

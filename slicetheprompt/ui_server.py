@@ -21,7 +21,7 @@ import webbrowser
 
 import yaml
 
-from . import assembly as asm_mod, history, import3mf, kosten as kosten_mod, meshcheck as mc, params as params_mod, pipeline
+from . import assembly as asm_mod, history, import3mf, kosten as kosten_mod, meshcheck as mc, params as params_mod, pipeline, usage_eval as usage_mod
 from .config import PROJECTS_DIR, load_config, project_dir
 from .moonraker import Moonraker
 
@@ -928,6 +928,61 @@ class StudioHandler(BaseHTTPRequestHandler):
                 self._send_json(prices_state())
                 return
 
+            if raw_path in ("/usage", "/usage/"):
+                self._serve_static("/index.html")
+                return
+
+            if raw_path == "/api/usage/overview":
+                days = float((qs.get("days") or ["14"])[0])
+                agy_dir = getattr(self.server, "agy_dir", None)
+                cal_path = getattr(self.server, "usage_cal_path", None)
+                self._send_json(
+                    usage_mod.build_usage_overview(
+                        days=days,
+                        agy_dir=agy_dir,
+                        projects_root=self.projects_root,
+                        cal_path=cal_path,
+                    )
+                )
+                return
+
+            if raw_path.startswith("/api/usage/projects/"):
+                proj_raw = raw_path[len("/api/usage/projects/"):].strip("/")
+                proj_name = urllib.parse.unquote(proj_raw)
+                cand = (self.projects_root / proj_name).resolve()
+                if not proj_name or not cand.is_relative_to(self.projects_root):
+                    raise PermissionError(f"Ungültiger Projektpfad: {proj_name}")
+                days = float((qs.get("days") or ["30"])[0])
+                agy_dir = getattr(self.server, "agy_dir", None)
+                cal_path = getattr(self.server, "usage_cal_path", None)
+                self._send_json(
+                    usage_mod.build_project_detail(
+                        proj_name,
+                        agy_dir=agy_dir,
+                        projects_root=self.projects_root,
+                        cal_path=cal_path,
+                        days=days,
+                    )
+                )
+                return
+
+            if raw_path.startswith("/api/usage/conversations/"):
+                conv_id = urllib.parse.unquote(raw_path[len("/api/usage/conversations/"):].strip("/"))
+                if not conv_id:
+                    self._send_json({"ok": False, "error": "Conversation-ID fehlt"}, status=400)
+                    return
+                agy_dir = getattr(self.server, "agy_dir", None)
+                cal_path = getattr(self.server, "usage_cal_path", None)
+                self._send_json(
+                    usage_mod.build_conversation_detail(
+                        conv_id,
+                        agy_dir=agy_dir,
+                        projects_root=self.projects_root,
+                        cal_path=cal_path,
+                    )
+                )
+                return
+
             if raw_path == "/api/events":
                 self._handle_sse()
                 return
@@ -1054,6 +1109,82 @@ class StudioHandler(BaseHTTPRequestHandler):
                     self._send_json({"ok": False, "error": str(exc)}, status=422)
                     return
                 self._send_json({**res, "preise": prices_state()})
+                return
+
+            if raw_path == "/api/usage/parse-screenshot":
+                try:
+                    body = self._read_body_json()
+                except (ValueError, json.JSONDecodeError) as exc:
+                    self._send_json({"ok": False, "error": str(exc)}, status=400)
+                    return
+                img_b64 = body.get("image_base64") or body.get("image") or ""
+                if not isinstance(img_b64, str) or not img_b64.strip():
+                    self._send_json({"ok": False, "error": "Feld 'image_base64' fehlt"}, status=400)
+                    return
+                agy_dir = getattr(self.server, "agy_dir", None)
+                cal_path = getattr(self.server, "usage_cal_path", None)
+                from . import usage_screenshot
+                try:
+                    parsed_res = usage_screenshot.parse_usage_screenshot(
+                        img_b64,
+                        agy_dir=agy_dir,
+                        cal_path=cal_path,
+                    )
+                except ValueError as exc:
+                    self._send_json({"ok": False, "error": str(exc)}, status=400)
+                    return
+                self._send_json(parsed_res)
+                return
+
+            if raw_path == "/api/usage/calibrate":
+                body = self._read_body_json()
+                agy_dir = getattr(self.server, "agy_dir", None)
+                cal_path = getattr(self.server, "usage_cal_path", None)
+                settings_updates = body.get("settings") if isinstance(body.get("settings"), dict) else {}
+                for k in ("show_eco_metrics", "currency", "usd_to_chf", "custom_models", "new_pool"):
+                    if k in body and k not in settings_updates:
+                        settings_updates[k] = body[k]
+                if settings_updates:
+                    usage_mod.update_settings(settings_updates, cal_path=cal_path)
+
+                def _opt_pct(val: Any) -> float | None:
+                    if val in (None, ""):
+                        return None
+                    return float(str(val).replace(",", ".").replace("%", ""))
+
+                snaps = body.get("snapshots")
+                if not isinstance(snaps, list) and body.get("pool_id"):
+                    snaps = [body]
+                if isinstance(snaps, list):
+                    for sn in snaps:
+                        if not isinstance(sn, dict) or not sn.get("pool_id"):
+                            continue
+                        pct_val = _opt_pct(sn.get("pct_left"))
+                        lim_val = _opt_pct(sn.get("limit_cu"))
+                        usage_mod.calibrate_pool_snapshot(
+                            pool_id=str(sn["pool_id"]),
+                            horizon=str(sn.get("horizon") or "weekly"),
+                            pct_left=pct_val,
+                            resets_in=sn.get("resets_in") or None,
+                            limit_cu=lim_val,
+                            agy_dir=agy_dir,
+                            cal_path=cal_path,
+                            ring_pct=_opt_pct(sn.get("ring_pct")),
+                            ring_color=str(sn["ring_color"]) if sn.get("ring_color") else None,
+                            ocr_pct=_opt_pct(sn.get("ocr_pct")),
+                            source=str(sn.get("source") or "manual"),
+                            selected_model=str(sn.get("selected_model") or body.get("selected_model") or "") or None,
+                            selected_effort=str(sn.get("selected_effort") or body.get("selected_effort") or "") or None,
+                        )
+
+                days = float(body.get("days") or 14.0)
+                ov = usage_mod.build_usage_overview(
+                    days=days,
+                    agy_dir=agy_dir,
+                    projects_root=self.projects_root,
+                    cal_path=cal_path,
+                )
+                self._send_json({"ok": True, "overview": ov})
                 return
 
             if not raw_path.startswith("/api/projects/"):
