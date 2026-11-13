@@ -300,18 +300,41 @@ class Pipe:
             callables[fn_name] = entry["callable"]
         return decls, callables
 
-    async def _create_interaction_with_backoff(self, client: genai.Client, **kwargs: Any) -> Any:
-        """Ruft client.interactions.create mit Exponential Backoff bei HTTP 429 auf."""
+    async def _create_interaction_with_backoff(
+        self, client: genai.Client, api_key: str = "", **kwargs: Any
+    ) -> tuple[Any, genai.Client]:
+        """Ruft client.interactions.create mit Exponential Backoff bei 429 und transienten Netz-/Verbindungsabbrüchen auf."""
         delay = 1.5
+        active_client = client
         for attempt in range(self.valves.MAX_429_RETRIES + 1):
             try:
-                return await asyncio.to_thread(client.interactions.create, **kwargs)
+                res = await asyncio.to_thread(active_client.interactions.create, **kwargs)
+                return res, active_client
             except Exception as exc:
                 msg = str(exc).lower()
                 is_rate_limit = "429" in msg or "resource_exhausted" in msg or "quota" in msg or "rate" in msg
-                if is_rate_limit and attempt < self.valves.MAX_429_RETRIES:
+                is_transient_net = any(
+                    tok in msg
+                    for tok in (
+                        "disconnected",
+                        "remoteprotocolerror",
+                        "connection reset",
+                        "broken pipe",
+                        "temporary failure in name resolution",
+                        "timed out",
+                        "timeout",
+                        "eof",
+                        "502",
+                        "503",
+                        "504",
+                        "unavailable",
+                    )
+                )
+                if (is_rate_limit or is_transient_net) and attempt < self.valves.MAX_429_RETRIES:
                     await asyncio.sleep(delay)
                     delay *= 2.0
+                    if is_transient_net and api_key:
+                        active_client = genai.Client(api_key=api_key)
                     continue
                 raise
 
@@ -458,7 +481,7 @@ class Pipe:
                 req_kwargs["previous_interaction_id"] = previous_interaction_id
 
             try:
-                interaction = await self._create_interaction_with_backoff(client, **req_kwargs)
+                interaction, client = await self._create_interaction_with_backoff(client, api_key=api_key, **req_kwargs)
             except Exception as exc:
                 return await _finish(f"❌ Gemini API Fehler in Schritt {iteration}: {exc}", f"API-Fehler: {exc}", "api_error")
 
@@ -555,7 +578,7 @@ class Pipe:
             }
             if previous_interaction_id:
                 final_req["previous_interaction_id"] = previous_interaction_id
-            final_int = await self._create_interaction_with_backoff(client, **final_req)
+            final_int, client = await self._create_interaction_with_backoff(client, api_key=api_key, **final_req)
             turn_usage = self._extract_usage(final_int)
             for k in total_usage:
                 total_usage[k] += turn_usage[k]

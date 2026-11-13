@@ -300,6 +300,39 @@ class TestOpenWebUIReactPipe(unittest.TestCase):
         self.assertIn("Eigener Prompt", seen_sys[0])
         self.assertIn("STOPP-REGEL", seen_sys[0])
 
+    def test_transient_disconnect_recreates_client_and_retries(self):
+        mod = _load_pipe_module()
+        pipe = mod.Pipe()
+        pipe.valves.GEMINI_API_KEY = "test-key"
+        pipe.valves.MIN_DELAY_SECONDS = 0.0
+        pipe.valves.MAX_429_RETRIES = 2
+
+        clients_created = {"n": 0}
+
+        class FakeInteractions:
+            def __init__(self, idx):
+                self.idx = idx
+
+            def create(self, **kwargs):
+                if self.idx == 1:
+                    raise RuntimeError("Server disconnected without sending a response.")
+                return _interaction("int-ok", steps=[], output_text="Wieder verbunden")
+
+        def make_client(**kwargs):
+            clients_created["n"] += 1
+            return types.SimpleNamespace(interactions=FakeInteractions(clients_created["n"]))
+
+        async def fast_sleep(_):
+            return None
+
+        tools = {"project_new": {"callable": lambda **k: None, "spec": {"name": "project_new", "parameters": {"type": "object", "properties": {}}}}}
+        with patch.object(mod.genai, "Client", side_effect=make_client), \
+             patch.object(mod.asyncio, "sleep", side_effect=fast_sleep):
+            out = asyncio.run(pipe.pipe({"messages": [{"role": "user", "content": "Test"}]}, __tools__=tools))
+
+        self.assertEqual(out, "Wieder verbunden")
+        self.assertEqual(clients_created["n"], 2)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
