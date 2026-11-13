@@ -3,6 +3,7 @@ import { OrbitControls } from "/vendor/OrbitControls.js";
 import { STLLoader } from "/vendor/STLLoader.js";
 import { Mechanism, freezePlan } from "/kinematics.js";
 import { buildBVH, meshesPenetrate } from "/collide.js";
+import { initUsageUI, refreshSidebarPartCard, refreshUsageOverview } from "/usage.js";
 
 // ============================================================================
 // Global Studio State
@@ -1458,6 +1459,7 @@ async function selectProject(projName, version = null, fitCam = true) {
   renderParamsForm();
   renderChecksAndSpec();
   renderCosts();
+  refreshSidebarPartCard(projName);
   await rebuildSceneGeometry(fitCam);
 }
 
@@ -2716,25 +2718,29 @@ function bindImportDrop() {
   let uploading = false;
   const overlay = document.getElementById("drop-overlay");
   const hasFiles = (ev) => Array.from(ev.dataTransfer?.types || []).includes("Files");
+  const isUsageModalOpen = () => {
+    const m = document.getElementById("usage-modal");
+    return !!(m && !m.classList.contains("hidden"));
+  };
   const reset = () => { depth = 0; overlay.classList.add("hidden"); };
   document.addEventListener("dragenter", (ev) => {
-    if (!hasFiles(ev)) return;
+    if (!hasFiles(ev) || isUsageModalOpen()) return;
     ev.preventDefault();
     depth++;
     overlay.classList.remove("hidden");
   }, true);
   document.addEventListener("dragover", (ev) => {
-    if (!hasFiles(ev)) return;
+    if (!hasFiles(ev) || isUsageModalOpen()) return;
     ev.preventDefault();
     ev.dataTransfer.dropEffect = "copy";
     overlay.classList.remove("hidden");
   }, true);
   document.addEventListener("dragleave", (ev) => {
-    if (!hasFiles(ev)) return;
+    if (!hasFiles(ev) || isUsageModalOpen()) return;
     if (--depth <= 0) reset();
   }, true);
   document.addEventListener("drop", async (ev) => {
-    if (!hasFiles(ev)) return;
+    if (!hasFiles(ev) || isUsageModalOpen()) return;
     ev.preventDefault();
     ev.stopPropagation();
     reset();
@@ -3808,4 +3814,9 @@ function animate() {
   setInterval(pollPrinterStatus, 4000);
   loadPrices();
   setInterval(() => loadPrinterDetails(false), 15000);
+  initUsageUI({
+    onOpenProjectVersion: (proj, ver) => selectProject(proj, ver, true),
+    getCurrentProject: () => S.currentProject,
+  });
+  setInterval(() => refreshUsageOverview({ selectCurrentProject: S.currentProject }), 30000);
 })();

@@ -254,6 +254,16 @@ def main(argv=None) -> int:
     s.add_argument("--offset", nargs=3, type=lambda v: float(v.replace(",", ".")), default=None)
     s.add_argument("--overlap", type=lambda v: float(v.replace(",", ".")), default=2.0)
 
+    s = sub.add_parser("usage", help="Antigravity Usage-, Pool- & Kosten-Auswertung (5h/Weekly, Projekte, Chats)")
+    s.add_argument("--project", default="", help="Detail-Auswertung & Chat-Timeline für ein Teil-Projekt")
+    s.add_argument("--conversation", default="", help="Detail-Auswertung für eine bestimmte Conversation-ID")
+    s.add_argument("--days", type=float, default=7.0, help="Betrachteter Zeitraum in Tagen (Standard: 7)")
+    s.add_argument("--pool", default="", help="Pool für Kalibrierung (z. B. gemini, claude_gpt, argon)")
+    s.add_argument("--horizon", choices=["5h", "weekly"], default="weekly", help="Limit-Horizont für Kalibrierung")
+    s.add_argument("--pct-left", type=lambda v: float(v.replace(",", ".")), default=None, help="Aktuell angezeigte Rest-Prozent")
+    s.add_argument("--resets-in", default="", help="Restzeit bis Reset (z. B. '1d 6h' oder '3h 9m')")
+    s.add_argument("--eco", choices=["on", "off"], default=None, help="Energie-/Wasser-Schätzung ein- oder ausschalten")
+
     a = ap.parse_args(argv)
     try:
         if a.cmd == "setup":
@@ -392,6 +402,29 @@ def main(argv=None) -> int:
                 offset_xyz=a.offset,
                 overlap_mm=a.overlap,
             ))
+        elif a.cmd == "usage":
+            from .usage_eval import (
+                build_conversation_detail,
+                build_project_detail,
+                build_usage_overview,
+                calibrate_pool_snapshot,
+                update_settings,
+            )
+            if a.eco is not None:
+                update_settings({"show_eco_metrics": a.eco == "on"})
+            if a.pool and (a.pct_left is not None or a.resets_in):
+                calibrate_pool_snapshot(
+                    pool_id=a.pool,
+                    horizon=a.horizon,
+                    pct_left=a.pct_left,
+                    resets_in=a.resets_in or None,
+                )
+            if a.project:
+                _out(build_project_detail(a.project, days=max(a.days, 30.0)))
+            elif a.conversation:
+                _out(build_conversation_detail(a.conversation))
+            else:
+                _out(build_usage_overview(days=a.days))
     except Exception as exc:
         print(f"FEHLER: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1
