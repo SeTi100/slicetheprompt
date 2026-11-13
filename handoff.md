@@ -101,6 +101,13 @@ if [ -d /mnt/android_out ] && [ -f /root/slicetheprompt/scripts/openwebui_gemini
   cp -f /root/slicetheprompt/scripts/openwebui_gemini_react_pipe.json /mnt/android_out/slicetheprompt_react_pipe.json
 fi
 
+# Open WebUI Pipe direkt in webui.db synchronisieren (behält Valves/API-Key)
+if [ -f /root/slicetheprompt/scripts/sync_openwebui_pipe.py ] && [ -x /root/.local/share/uv/tools/open-webui/bin/python ]; then
+  DATA_DIR="/root/.local/share/uv/tools/open-webui/lib/python3.12/site-packages/open_webui/data" \
+  WEBUI_SECRET_KEY=temp \
+  /root/.local/share/uv/tools/open-webui/bin/python /root/slicetheprompt/scripts/sync_openwebui_pipe.py || true
+fi
+
 echo "=== 2. Dienste mit neuem Code neu starten ==="
 exec /root/start_all.sh
 ```
