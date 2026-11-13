@@ -63,7 +63,8 @@ class TestOpenWebUIReactPipe(unittest.TestCase):
             {"role": "system", "content": "Custom CAD Prompt"},
             {"role": "user", "content": "Bau mir einen Würfel"},
         ])
-        self.assertEqual(sys_txt, "Custom CAD Prompt")
+        self.assertIn("Custom CAD Prompt", sys_txt)
+        self.assertIn("STOPP-REGEL", sys_txt)
         self.assertEqual(user_txt, "Bau mir einen Würfel")
 
     def test_parse_mcp_sse_and_json(self):
@@ -254,6 +255,50 @@ class TestOpenWebUIReactPipe(unittest.TestCase):
             self.assertEqual(rec["thought_tokens"], 50)
             self.assertEqual(rec["steps"], 2)
             self.assertEqual(rec["status"], "ok")
+
+    def test_custom_system_prompt_keeps_react_stop_rules_and_soft_duplicate_recovery(self):
+        mod = _load_pipe_module()
+        pipe = mod.Pipe()
+        pipe.valves.GEMINI_API_KEY = "test-key"
+        pipe.valves.MIN_DELAY_SECONDS = 0.0
+        pipe.valves.APPEND_USAGE_FOOTER = False
+
+        seen_sys = []
+        interactions = [
+            _interaction("int-1", steps=[_step("function_call", id="c1", name="auto_restore", arguments={})]),
+            _interaction("int-2", steps=[_step("function_call", id="c2", name="auto_restore", arguments={})]),
+            _interaction("int-3", output_text="Fertig nach Hinweis."),
+        ]
+
+        class FakeInteractions:
+            def create(self, **kwargs):
+                seen_sys.append(kwargs.get("system_instruction", ""))
+                return interactions.pop(0)
+
+        call_count = {"n": 0}
+
+        async def fake_tool(**kwargs):
+            call_count["n"] += 1
+            return {"ok": True}
+
+        tools = {"auto_restore": {"callable": fake_tool, "spec": {"name": "auto_restore", "parameters": {"type": "object", "properties": {}}}}}
+        with patch.object(mod.genai, "Client", return_value=types.SimpleNamespace(interactions=FakeInteractions())):
+            out = asyncio.run(
+                pipe.pipe(
+                    {
+                        "messages": [
+                            {"role": "system", "content": "Eigener Prompt"},
+                            {"role": "user", "content": "Mach was"},
+                        ]
+                    },
+                    __tools__=tools,
+                )
+            )
+
+        self.assertEqual(out, "Fertig nach Hinweis.")
+        self.assertEqual(call_count["n"], 1)
+        self.assertIn("Eigener Prompt", seen_sys[0])
+        self.assertIn("STOPP-REGEL", seen_sys[0])
 
 
 if __name__ == "__main__":

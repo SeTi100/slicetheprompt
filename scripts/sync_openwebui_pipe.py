@@ -22,7 +22,7 @@ async def main() -> None:
     fid = "slicetheprompt_gemini_react"
     meta = FunctionMeta(
         description="Multi-Turn ReAct Agent Pipe für Open WebUI mit Google GenAI SDK (>= 2.30.1), direkter MCP-Anbindung, Failsafes & Token-Tracking.",
-        manifest={"title": "SliceThePrompt Gemini ReAct Agent", "author": "slicetheprompt", "version": "1.2.1"},
+        manifest={"title": "SliceThePrompt Gemini ReAct Agent", "author": "slicetheprompt", "version": "1.2.2"},
     )
 
     existing = await _maybe(Functions.get_function_by_id(fid))

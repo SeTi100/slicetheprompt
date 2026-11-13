@@ -1,7 +1,7 @@
 """
 title: SliceThePrompt Gemini ReAct Agent
 author: slicetheprompt
-version: 1.0.0
+version: 1.2.2
 description: Multi-Turn ReAct Agent Pipe für Open WebUI mit Google GenAI SDK (>= 2.30.1) und direkter MCP-Anbindung inkl. Failsafes.
 """
 # Benötigte Pakete im Open WebUI venv: google-genai>=2.30.1, httpx>=0.27.0, pydantic>=2.0.0
@@ -21,7 +21,14 @@ import httpx
 from google import genai
 from pydantic import BaseModel, Field
 
-DEFAULT_SYSTEM_PROMPT = """\
+REACT_STOP_RULES = """\
+WICHTIGE AUSFÜHRUNGS- & STOPP-REGELN (ReAct):
+- Rufe Werkzeuge zielgerichtet und ohne unnötige Wiederholungen auf. Rufe NIEMALS dasselbe Werkzeug zweimal mit identischen Argumenten auf.
+- Für CAD-Teile: Schreibe sauberen build123d-Code (`part` oder `bodies`, z=0 auf Druckbett) und rufe direkt `project_new(name=..., material=..., code=...)` auf.
+- STOPP-REGEL: Sobald `project_new` oder `build_and_check` `stage="done"` und `report.passed=True` zurückgibt, bist du FERTIG! Rufe KEINE weiteren Tools auf, sondern antworte sofort dem Nutzer mit den Maßen, Checks und dem Link zum 3D-Studio (http://127.0.0.1:8765).
+- Nur bei `ok=False` oder `report.passed=False`: Fehler beheben und `build_and_check` aufrufen."""
+
+DEFAULT_SYSTEM_PROMPT = f"""\
 Du bist ein präziser CAD-Konstrukteur für 3D-Druckteile mit build123d.
 Wenn der Nutzer ein Teil anfordert:
 1. Schreibe sauberen build123d-Code (MUSS `part` oder `bodies` definieren, z=0 auf Druckbett):
@@ -33,11 +40,10 @@ Wenn der Nutzer ein Teil anfordert:
    part = Box(20, 20, 20, align=C)
    part = bottom_chamfer(part)
    bb = part.bounding_box()
-   checks = {"Breite": (bb.size.X, 20.0, 0.05)}
+   checks = {{"Breite": (bb.size.X, 20.0, 0.05)}}
    ```
 2. Rufe direkt `project_new(name="...", material="pla", code="...")` auf.
-3. WICHTIGE STOPP-REGEL: Sobald `project_new` oder `build_and_check` `stage="done"` und `report.passed=True` zurückgibt, bist du FERTIG! Rufe KEINE weiteren Tools auf (kein `render_views`, kein `check_report`, kein `cfs_status`, kein `slice`), sondern antworte sofort dem Nutzer mit den Maßen, Checks und dem Link zum 3D-Studio (http://127.0.0.1:8765).
-4. NUR wenn `ok=False` oder `report.passed=False` (echter Fehler) zurückkommt, analysiere den Fehler, korrigiere den Code und rufe `build_and_check(project="...", code="...")` auf.
+{REACT_STOP_RULES}
 """
 
 
@@ -159,7 +165,10 @@ class Pipe:
             elif role == "assistant":
                 turns.append(f"Assistent: {content}")
 
-        system_instruction = "\n\n".join(system_parts) if system_parts else DEFAULT_SYSTEM_PROMPT
+        if system_parts:
+            system_instruction = "\n\n".join(system_parts) + "\n\n" + REACT_STOP_RULES
+        else:
+            system_instruction = DEFAULT_SYSTEM_PROMPT
         if len(turns) == 1 and turns[0].startswith("Nutzer: "):
             user_input = turns[0][len("Nutzer: "):]
         else:
@@ -416,7 +425,7 @@ class Pipe:
 
         t_start = time.monotonic()
         total_usage = {"input_tokens": 0, "output_tokens": 0, "thought_tokens": 0, "total_tokens": 0}
-        seen_calls: set[str] = set()
+        call_counts: dict[str, int] = {}
         consecutive_errors = 0
         previous_interaction_id: str | None = None
         next_input: Any = user_input
@@ -472,14 +481,32 @@ class Pipe:
                 call_id = getattr(call, "id", fn_name)
 
                 sig = hashlib.sha1(f"{fn_name}:{json.dumps(fn_args, sort_keys=True, default=str)}".encode()).hexdigest()
-                if sig in seen_calls:
+                count = call_counts.get(sig, 0) + 1
+                call_counts[sig] = count
+                if count == 2:
+                    await self._emit(__event_emitter__, f"Schritt {iteration}: Doppelter `{fn_name}`-Aufruf abgefangen…")
+                    function_results.append({
+                        "type": "function_result",
+                        "call_id": call_id,
+                        "name": fn_name,
+                        "result": {
+                            "ok": False,
+                            "duplicate_blocked": True,
+                            "message": (
+                                f"'{fn_name}' wurde bereits mit identischen Argumenten ausgeführt. "
+                                "Rufe dieses Werkzeug nicht erneut mit denselben Argumenten auf, sondern "
+                                "nutze das bisherige Ergebnis oder antworte dem Nutzer jetzt direkt."
+                            ),
+                        },
+                    })
+                    continue
+                if count >= 3:
                     return await _finish(
                         f"⚠️ ReAct-Failsafe ausgelöst: Das Modell wollte `{fn_name}` mit identischen Argumenten "
-                        f"erneut aufrufen. Letzter Fehler: {last_error_msg or 'keiner'}",
+                        f"mehrfach aufrufen. Letzter Fehler: {last_error_msg or 'keiner'}",
                         "Abbruch: Identischer Tool-Aufruf wiederholt",
                         "duplicate_call",
                     )
-                seen_calls.add(sig)
 
                 await self._emit(__event_emitter__, f"Schritt {iteration}/{self.valves.MAX_ITERATIONS}: Führe `{fn_name}` aus…")
 
