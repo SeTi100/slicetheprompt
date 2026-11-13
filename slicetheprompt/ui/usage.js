@@ -34,6 +34,7 @@ const state = {
     result: null,
     bySlot: {},
     editedSlots: {},
+    autoSaved: false,
   },
 };
 
@@ -139,6 +140,7 @@ async function parseScreenshotDataUrl(dataUrl) {
     result: null,
     bySlot: {},
     editedSlots: {},
+    autoSaved: false,
   };
   renderCalibrationDrawer();
 
@@ -148,6 +150,44 @@ async function parseScreenshotDataUrl(dataUrl) {
     for (const sn of res.snapshots || []) {
       bySlot[slotKey(sn.pool_id, sn.horizon)] = sn;
     }
+    const snaps = res.snapshots || [];
+    const hasMismatch = snaps.some((s) => s.mismatch) || (res.warnings || []).some((w) => w.code === "ocr_ring_mismatch");
+    let autoSaved = false;
+
+    if (snaps.length > 0 && !hasMismatch) {
+      try {
+        const activeM = state.overview?.active_model;
+        const calSnaps = snaps
+          .filter((sn) => sn.pct_left != null)
+          .map((sn) => ({
+            pool_id: sn.pool_id,
+            horizon: sn.horizon,
+            pct_left: Number(sn.pct_left),
+            resets_in: sn.resets_in || "",
+            ...(sn.ring_pct != null ? { ring_pct: sn.ring_pct } : {}),
+            ...(sn.ring_color ? { ring_color: sn.ring_color } : {}),
+            ...(sn.ocr_pct != null ? { ocr_pct: sn.ocr_pct } : {}),
+            source: sn.source || "ocr+ring",
+          }));
+        if (calSnaps.length > 0) {
+          const calRes = await apiPost("/api/usage/calibrate", {
+            days: 14,
+            snapshots: calSnaps,
+            selected_model: res.selected_model?.name || activeM?.model_name || "",
+            selected_effort: res.selected_model?.effort || activeM?.effort || "",
+          });
+          if (calRes?.overview) {
+            state.overview = calRes.overview;
+            autoSaved = true;
+            renderStatusPill();
+            renderDashboardHeader();
+          }
+        }
+      } catch (saveErr) {
+        console.warn("Auto-Save nach Screenshot fehlgeschlagen:", saveErr);
+      }
+    }
+
     state.screenshot = {
       loading: false,
       error: null,
@@ -155,6 +195,7 @@ async function parseScreenshotDataUrl(dataUrl) {
       result: res,
       bySlot,
       editedSlots: {},
+      autoSaved,
     };
   } catch (err) {
     state.screenshot.loading = false;
@@ -667,8 +708,11 @@ function renderCalibrationDrawer() {
     const selHtml = (state.devMode && selM)
       ? `<div class="cal-ss-selected">🎯 <strong>Gewählt (OCR):</strong> ${esc(selM.name)}${selM.effort ? ` · <span class="effort-pill">${esc(selM.effort)}</span>` : ""}</div>`
       : "";
+    const savedTag = ss.autoSaved
+      ? ` · <strong>Automatisch gespeichert ✓</strong>`
+      : (snapCnt > 0 ? ` · <em>Bitte prüfen &amp; speichern</em>` : "");
     ssStatusHtml = `
-      <span class="cal-ss-status ok">✓ ${esc(engineTxt)} · ${ringCnt} Ringe · ${snapCnt} Werte erkannt</span>
+      <span class="cal-ss-status ok">✓ ${esc(engineTxt)} · ${ringCnt} Ringe · ${snapCnt} Werte erkannt${savedTag}</span>
       ${selHtml}
       ${warns}`;
   } else {
