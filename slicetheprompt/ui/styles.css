@@ -661,7 +661,7 @@ button {
 /* Right Sidebar Tabs */
 .tab-bar {
   display: grid;
-  grid-template-columns: 1.35fr 0.85fr 1fr 0.75fr;
+  grid-template-columns: 1.25fr 0.85fr 0.95fr 0.7fr 0.7fr;
   border-bottom: 1px solid var(--border);
   background: #0f141d;
 }
@@ -1423,4 +1423,178 @@ button {
     width: calc(100vw - 16px);
     max-height: 88dvh;
   }
+}
+
+/* ==================== USAGE TAB (ANDROID API LOGS) ==================== */
+.usage-periods {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.usage-content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.usage-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.usage-kpi-card {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.usage-kpi-label {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.usage-kpi-val {
+  font-family: var(--mono);
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.usage-kpi-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.usage-err {
+  color: var(--red);
+  font-weight: 600;
+}
+
+.usage-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.usage-block-title {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.usage-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  height: 98px;
+  padding: 8px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow-x: auto;
+}
+
+.usage-bar-col {
+  flex: 1 0 28px;
+  min-width: 28px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+}
+
+.usage-bar-val {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.usage-bar-track {
+  flex: 1;
+  width: 100%;
+  max-width: 22px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 4px;
+  display: flex;
+  align-items: flex-end;
+  overflow: hidden;
+}
+
+.usage-bar-fill {
+  width: 100%;
+  background: var(--accent);
+  border-radius: 4px 4px 0 0;
+}
+
+.usage-bar-lbl {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  color: var(--text-muted);
+}
+
+.usage-table td,
+.usage-table th {
+  font-size: 11px;
+}
+
+.usage-recent-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.usage-recent-item {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 7px 9px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11.5px;
+}
+
+.usage-recent-top,
+.usage-recent-mid,
+.usage-recent-bot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.usage-recent-mid {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.usage-recent-bot {
+  font-size: 11px;
+  color: var(--text-main);
+}
+
+.badge-ok {
+  background: rgba(34, 197, 94, 0.16);
+  color: var(--green);
+  border: 1px solid rgba(34, 197, 94, 0.35);
+}
+
+.badge-err {
+  background: rgba(239, 68, 68, 0.16);
+  color: var(--red);
+  border: 1px solid rgba(239, 68, 68, 0.35);
 }

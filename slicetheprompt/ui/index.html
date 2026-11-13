@@ -222,6 +222,7 @@
         <button class="tab-btn" data-tab="params">Parameter</button>
         <button class="tab-btn" data-tab="specs">Checks &amp; Spec</button>
         <button class="tab-btn" data-tab="kosten" title="Kosten &amp; Drucker-Details">Kosten</button>
+        <button class="tab-btn" data-tab="usage" title="API Token-Verbrauch &amp; Kosten">Usage</button>
       </nav>
 
       <!-- TAB 1: DIAGNOSE & MARKIERUNG -->
@@ -350,6 +351,24 @@
             <button id="btn-details-reload" class="btn-xs" title="Neu abfragen">↻</button>
           </div>
           <div id="printer-details" class="spec-details"><span class="status-muted">Wird abgefragt …</span></div>
+        </div>
+      </section>
+
+      <!-- TAB 5: API TOKEN-USAGE (LOGS) -->
+      <section id="tab-usage" class="tab-pane">
+        <div class="pane-section">
+          <div class="section-header">
+            <span>API Token-Usage (Logs)</span>
+            <button id="btn-usage-reload" class="btn-xs" title="Token-Logs neu einlesen">↻</button>
+          </div>
+          <div id="usage-periods" class="usage-periods" role="group" aria-label="Zeitraum">
+            <button type="button" class="seg-btn active" data-period="today">Heute</button>
+            <button type="button" class="seg-btn" data-period="week">7 Tage</button>
+            <button type="button" class="seg-btn" data-period="all">Gesamt</button>
+          </div>
+          <div id="usage-content" class="usage-content">
+            <span class="status-muted">Wird geladen …</span>
+          </div>
         </div>
       </section>
     </aside>

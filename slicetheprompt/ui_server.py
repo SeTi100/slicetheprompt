@@ -23,7 +23,7 @@ import webbrowser
 
 import yaml
 
-from . import assembly as asm_mod, history, import3mf, kosten as kosten_mod, meshcheck as mc, params as params_mod, pipeline
+from . import assembly as asm_mod, history, import3mf, kosten as kosten_mod, meshcheck as mc, params as params_mod, pipeline, token_usage
 from .config import PROJECTS_DIR, load_config, project_dir
 from .moonraker import Moonraker
 
@@ -937,6 +937,11 @@ class StudioHandler(BaseHTTPRequestHandler):
 
             if raw_path == "/api/preise":
                 self._send_json(prices_state())
+                return
+
+            if raw_path == "/api/usage":
+                log_path = getattr(self.server, "token_log_path", None)
+                self._send_json(token_usage.load_usage_summary(log_path=log_path))
                 return
 
             if raw_path == "/api/events":

@@ -3,6 +3,7 @@ import { OrbitControls } from "/vendor/OrbitControls.js";
 import { STLLoader } from "/vendor/STLLoader.js";
 import { Mechanism, freezePlan } from "/kinematics.js";
 import { buildBVH, meshesPenetrate } from "/collide.js";
+import { initUsageTab, loadUsageTab } from "/usage.js";
 
 // ============================================================================
 // Global Studio State
@@ -2449,6 +2450,7 @@ function switchRightTab(tabId) {
   document.querySelectorAll(".tab-btn").forEach((b) => b.classList.toggle("active", b.dataset.tab === tabId));
   document.querySelectorAll(".tab-pane").forEach((p) => p.classList.toggle("active", p.id === `tab-${tabId}`));
   if (tabId === "kosten") loadPrinterDetails(true);
+  if (tabId === "usage") loadUsageTab();
 }
 
 function showToast(msg) {
@@ -2585,6 +2587,7 @@ function bindEvents() {
   document.querySelectorAll(".tab-btn").forEach((b) => {
     b.addEventListener("click", () => switchRightTab(b.dataset.tab));
   });
+  initUsageTab();
 
   // Historical & Ghost banners
   document.getElementById("btn-clear-ghost").addEventListener("click", async () => {
