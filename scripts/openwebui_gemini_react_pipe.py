@@ -1,7 +1,7 @@
 """
 title: SliceThePrompt Gemini ReAct Agent
 author: slicetheprompt
-version: 1.2.2
+version: 1.2.3
 description: Multi-Turn ReAct Agent Pipe für Open WebUI mit Google GenAI SDK (>= 2.30.1) und direkter MCP-Anbindung inkl. Failsafes.
 """
 # Benötigte Pakete im Open WebUI venv: google-genai>=2.30.1, httpx>=0.27.0, pydantic>=2.0.0
@@ -85,7 +85,11 @@ class Pipe:
             default=3,
             ge=0,
             le=6,
-            description="Anzahl Wiederholungen mit Exponential Backoff bei HTTP 429 / Quota-Limits.",
+            description="Anzahl Wiederholungen mit Exponential Backoff bei HTTP 429 / Verbindungsabbrüchen.",
+        )
+        USE_BACKGROUND_INTERACTIONS: bool = Field(
+            default=True,
+            description="Nutzt background=True + Polling (verhindert 60s-Gateway-Timeouts bei langen Denkschritten).",
         )
         EMIT_STATUS: bool = Field(
             default=True,
@@ -301,17 +305,44 @@ class Pipe:
         return decls, callables
 
     async def _create_interaction_with_backoff(
-        self, client: genai.Client, api_key: str = "", **kwargs: Any
+        self,
+        client: genai.Client,
+        api_key: str = "",
+        emitter: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+        step_label: str = "",
+        **kwargs: Any,
     ) -> tuple[Any, genai.Client]:
-        """Ruft client.interactions.create mit Exponential Backoff bei 429 und transienten Netz-/Verbindungsabbrüchen auf."""
+        """Ruft client.interactions.create mit Background-Polling und Backoff bei 429/Netzabbrüchen auf."""
         delay = 1.5
         active_client = client
+        req = dict(kwargs)
+        if self.valves.USE_BACKGROUND_INTERACTIONS and "background" not in req:
+            req["background"] = True
+
         for attempt in range(self.valves.MAX_429_RETRIES + 1):
             try:
-                res = await asyncio.to_thread(active_client.interactions.create, **kwargs)
+                res = await asyncio.to_thread(active_client.interactions.create, **req)
+                poll_start = time.monotonic()
+                while getattr(res, "status", None) in ("in_progress", "queued"):
+                    if time.monotonic() - poll_start > 240.0:
+                        raise TimeoutError("Gemini Background-Interaction hat nach 240s nicht geantwortet.")
+                    await asyncio.sleep(1.5)
+                    elapsed = int(time.monotonic() - poll_start)
+                    if emitter and step_label and elapsed % 6 == 0:
+                        await self._emit(emitter, f"{step_label} (warte auf Gemini… {elapsed}s)")
+                    try:
+                        res = await asyncio.to_thread(active_client.interactions.get, id=res.id)
+                    except Exception:
+                        # Einzelnen Polling-Netzwerkaussetzer tolerieren und weiterpollen
+                        continue
+                if getattr(res, "status", None) in ("failed", "cancelled"):
+                    err_detail = getattr(res, "error", None) or res.status
+                    raise RuntimeError(f"Interaction {res.status}: {err_detail}")
                 return res, active_client
             except Exception as exc:
                 msg = str(exc).lower()
+                if "background" in msg and req.pop("background", None) is not None:
+                    continue
                 is_rate_limit = "429" in msg or "resource_exhausted" in msg or "quota" in msg or "rate" in msg
                 is_transient_net = any(
                     tok in msg
@@ -481,7 +512,13 @@ class Pipe:
                 req_kwargs["previous_interaction_id"] = previous_interaction_id
 
             try:
-                interaction, client = await self._create_interaction_with_backoff(client, api_key=api_key, **req_kwargs)
+                interaction, client = await self._create_interaction_with_backoff(
+                    client,
+                    api_key=api_key,
+                    emitter=__event_emitter__,
+                    step_label=f"Denkschritt {iteration}",
+                    **req_kwargs,
+                )
             except Exception as exc:
                 return await _finish(f"❌ Gemini API Fehler in Schritt {iteration}: {exc}", f"API-Fehler: {exc}", "api_error")
 

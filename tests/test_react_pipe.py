@@ -333,6 +333,39 @@ class TestOpenWebUIReactPipe(unittest.TestCase):
         self.assertEqual(out, "Wieder verbunden")
         self.assertEqual(clients_created["n"], 2)
 
+    def test_background_interaction_polling(self):
+        mod = _load_pipe_module()
+        pipe = mod.Pipe()
+        pipe.valves.GEMINI_API_KEY = "test-key"
+        pipe.valves.MIN_DELAY_SECONDS = 0.0
+        pipe.valves.APPEND_USAGE_FOOTER = False
+
+        polls = {"n": 0}
+
+        class FakeInteractions:
+            def create(self, **kwargs):
+                self.bg = kwargs.get("background")
+                return types.SimpleNamespace(id="int-bg", status="in_progress", steps=[], output_text=None, usage=None)
+
+            def get(self, id):
+                polls["n"] += 1
+                if polls["n"] == 1:
+                    return types.SimpleNamespace(id=id, status="in_progress", steps=[], output_text=None, usage=None)
+                return types.SimpleNamespace(id=id, status="completed", steps=[], output_text="Polling fertig", usage=None)
+
+        async def fast_sleep(_):
+            return None
+
+        fake_interactions = FakeInteractions()
+        tools = {"project_new": {"callable": lambda **k: None, "spec": {"name": "project_new", "parameters": {"type": "object", "properties": {}}}}}
+        with patch.object(mod.genai, "Client", return_value=types.SimpleNamespace(interactions=fake_interactions)), \
+             patch.object(mod.asyncio, "sleep", side_effect=fast_sleep):
+            out = asyncio.run(pipe.pipe({"messages": [{"role": "user", "content": "Test"}]}, __tools__=tools))
+
+        self.assertTrue(fake_interactions.bg)
+        self.assertEqual(polls["n"], 2)
+        self.assertEqual(out, "Polling fertig")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
