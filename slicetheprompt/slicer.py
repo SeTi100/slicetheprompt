@@ -12,6 +12,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -624,6 +625,12 @@ _PATTERNS = {
 _TEMP = re.compile(r"^(M104|M109|M140|M190)\b[^;]*?\bS(\d+(?:\.\d+)?)", re.I)
 _MACRO = re.compile(r"\b(EXTRUDER_TEMP|BED_TEMP|NOZZLE_TEMP|HOTEND_TEMP)\s*=\s*(\d+(?:\.\d+)?)", re.I)
 _TOOL = re.compile(r"^T(\d+)\s*(?:;.*)?$")
+_PATTERNS_COMPILED = {
+    key: [re.compile(pat) for pat in pats]
+    for key, pats in _PATTERNS.items()
+}
+_GCODE_INFO_LOCK = threading.Lock()
+_GCODE_INFO_CACHE: dict[str, tuple[int, int, dict]] = {}
 
 
 def _sum_numbers(s: str) -> float:
@@ -635,19 +642,31 @@ def _split_list(s: str) -> list[str]:
 
 
 def gcode_info(path: str | Path) -> dict:
+    p = Path(path)
+    try:
+        st = p.stat()
+        cache_key = str(p.resolve())
+        with _GCODE_INFO_LOCK:
+            hit = _GCODE_INFO_CACHE.get(cache_key)
+            if hit is not None and hit[0] == st.st_mtime_ns and hit[1] == st.st_size:
+                return {k: (list(v) if isinstance(v, list) else v) for k, v in hit[2].items()}
+    except OSError:
+        st = None
+        cache_key = ""
+
     info: dict = {}
     max_nozzle = 0.0
     max_bed = 0.0
     tools: list[int] = []
     changes = 0
-    with open(path, encoding="utf-8", errors="replace") as f:
+    with open(p, encoding="utf-8", errors="replace") as f:
         for line in f:
             if line.startswith(";"):
-                for key, pats in _PATTERNS.items():
+                for key, pats in _PATTERNS_COMPILED.items():
                     if key in info:
                         continue
                     for pat in pats:
-                        m = re.search(pat, line)
+                        m = pat.search(line)
                         if m:
                             info[key] = m.group(1).strip()
                             break
@@ -687,8 +706,17 @@ def gcode_info(path: str | Path) -> dict:
         "tool_changes": changes,
         "max_nozzle_temp": max_nozzle,
         "max_bed_temp": max_bed,
-        "size_kb": round(Path(path).stat().st_size / 1024),
+        "size_kb": round(st.st_size / 1024) if st is not None else round(p.stat().st_size / 1024),
     }
+    if st is not None and cache_key:
+        with _GCODE_INFO_LOCK:
+            if len(_GCODE_INFO_CACHE) > 256:
+                _GCODE_INFO_CACHE.clear()
+            _GCODE_INFO_CACHE[cache_key] = (
+                st.st_mtime_ns,
+                st.st_size,
+                {k: (list(v) if isinstance(v, list) else v) for k, v in out.items()},
+            )
     return out
 
 

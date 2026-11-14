@@ -1695,37 +1695,43 @@ def _turn_to_dict(
     }
 
 
-def build_usage_overview(
-    days: float = 14.0,
-    agy_dir: Path | None = None,
-    projects_root: Path | None = None,
-    cal_path: Path | None = None,
-    now_utc: dt.datetime | None = None,
-) -> dict[str, Any]:
-    """Erstellt die komplette Account- und Workspace-Übersicht inkl. Teile & Versionen."""
-    now = now_utc or dt.datetime.now(dt.timezone.utc)
-    base = agy_dir or default_antigravity_dir()
-    p_root = projects_root or PROJECTS_DIR
-    cfg = load_calibration(cal_path)
-    overrides = cfg.get("custom_models") or {}
+def _settings_dict(cfg: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "currency": cfg["currency"],
+        "usd_to_chf": cfg["usd_to_chf"],
+        "show_eco_metrics": cfg["show_eco_metrics"],
+        "custom_models": cfg.get("custom_models", {}),
+    }
 
-    summaries = load_conversation_summaries(base)
-    children_map = _build_children_map(summaries)
+
+def _collect_account_requests(
+    days: float,
+    base: Path,
+    cfg: dict[str, Any],
+    now: dt.datetime,
+    summaries: dict[str, ConversationSummary],
+    children_map: dict[str, list[str]],
+) -> tuple[
+    list[str],
+    list[tuple[dt.datetime, str, ModelSpec, CostBreakdown]],
+    list[tuple[dt.datetime, str, ModelSpec, CostBreakdown, str]],
+    dict[str, Any] | None,
+]:
+    """Sammelt alle Requests inkl. Subagenten über alle Workspaces für Pool-Status & Plots."""
+    overrides = cfg.get("custom_models") or {}
     recent_ids = list_recent_conversation_ids(now - dt.timedelta(days=days), base)
 
-    # 1. Alle Requests für Pool- & Fading-Plot über ALLE Workspaces einsammeln
     all_requests: list[tuple[dt.datetime, str, ModelSpec, CostBreakdown]] = []
     effort_requests: list[tuple[dt.datetime, str, ModelSpec, CostBreakdown, str]] = []
-    # Root-Konversationen (keine Subagenten!) für Workspace- & Teile-Ansicht
     root_convs: list[str] = []
     latest_req_info: dict[str, Any] | None = None
     latest_req_ts: dt.datetime | None = None
+
     for cid in recent_ids:
         s = summaries.get(cid)
         if s and s.parent_conversation_id:
             continue
         root_convs.append(cid)
-        # Rekursive Requests aus diesem Chat inkl. Subagenten sammeln
         stack = [cid]
         seen_sub: set[str] = set()
         while stack:
@@ -1757,6 +1763,30 @@ def build_usage_overview(
                             "timestamp": req.timestamp.isoformat(),
                         }
             stack.extend(children_map.get(cur, []))
+
+    return root_convs, all_requests, effort_requests, latest_req_info
+
+
+def build_usage_overview(
+    days: float = 14.0,
+    agy_dir: Path | None = None,
+    projects_root: Path | None = None,
+    cal_path: Path | None = None,
+    now_utc: dt.datetime | None = None,
+) -> dict[str, Any]:
+    """Erstellt die komplette Account- und Workspace-Übersicht inkl. Teile & Versionen."""
+    now = now_utc or dt.datetime.now(dt.timezone.utc)
+    base = agy_dir or default_antigravity_dir()
+    p_root = projects_root or PROJECTS_DIR
+    cfg = load_calibration(cal_path)
+
+    summaries = load_conversation_summaries(base)
+    children_map = _build_children_map(summaries)
+
+    # 1. Alle Requests für Pool- & Fading-Plot über ALLE Workspaces einsammeln
+    root_convs, all_requests, effort_requests, latest_req_info = _collect_account_requests(
+        days, base, cfg, now, summaries, children_map
+    )
 
     pools_status = {
         pid: _compute_pool_status(pid, pcfg, all_requests, now)
@@ -1908,12 +1938,7 @@ def build_usage_overview(
     return {
         "ok": True,
         "generated_at": now.isoformat(),
-        "settings": {
-            "currency": cfg["currency"],
-            "usd_to_chf": cfg["usd_to_chf"],
-            "show_eco_metrics": cfg["show_eco_metrics"],
-            "custom_models": cfg.get("custom_models", {}),
-        },
+        "settings": _settings_dict(cfg),
         "pools": pools_status,
         "active_model": latest_req_info,
         "burn_matrix": burn_matrix,
@@ -1942,19 +1967,17 @@ def build_project_detail(
     cfg = load_calibration(cal_path)
     now = dt.datetime.now(dt.timezone.utc)
 
-    overview = build_usage_overview(days=days, agy_dir=base, projects_root=p_root, cal_path=cal_path, now_utc=now)
-    pools_status = overview["pools"]
-
     summaries = load_conversation_summaries(base)
     children_map = _build_children_map(summaries)
-    recent_ids = list_recent_conversation_ids(now - dt.timedelta(days=days), base)
+    root_convs, all_requests, _, _ = _collect_account_requests(days, base, cfg, now, summaries, children_map)
+    pools_status = {
+        pid: _compute_pool_status(pid, pcfg, all_requests, now)
+        for pid, pcfg in cfg["pools"].items()
+    }
 
     known_projects = [p.name for p in p_root.iterdir() if p.is_dir()] if p_root.is_dir() else []
     matched_turns: list[EvaluatedTurn] = []
-    for cid in recent_ids:
-        s = summaries.get(cid)
-        if s and s.parent_conversation_id:
-            continue
+    for cid in root_convs:
         turns = evaluate_conversation_turns(cid, cfg, base, summaries, children_map, known_projects)
         for t in turns:
             if t.project_name == project_name:
@@ -2005,7 +2028,7 @@ def build_project_detail(
         "turns": [_turn_to_dict(t, pools_status, cfg) for t in matched_turns],
         "unmatched_versions": unmatched_versions,
         "simulation": sim,
-        "settings": overview["settings"],
+        "settings": _settings_dict(cfg),
     }
 
 
@@ -2020,11 +2043,14 @@ def build_conversation_detail(
     p_root = projects_root or PROJECTS_DIR
     cfg = load_calibration(cal_path)
     now = dt.datetime.now(dt.timezone.utc)
-    overview = build_usage_overview(days=14.0, agy_dir=base, projects_root=p_root, cal_path=cal_path, now_utc=now)
-    pools_status = overview["pools"]
 
     summaries = load_conversation_summaries(base)
     children_map = _build_children_map(summaries)
+    _, all_requests, _, _ = _collect_account_requests(14.0, base, cfg, now, summaries, children_map)
+    pools_status = {
+        pid: _compute_pool_status(pid, pcfg, all_requests, now)
+        for pid, pcfg in cfg["pools"].items()
+    }
     known_projects = [p.name for p in p_root.iterdir() if p.is_dir()] if p_root.is_dir() else []
     turns = evaluate_conversation_turns(conv_id, cfg, base, summaries, children_map, known_projects)
 
@@ -2054,5 +2080,5 @@ def build_conversation_detail(
         "summary": _cost_to_dict(tot_cost, pools_status.get(dom_pool), cfg),
         "turns": [_turn_to_dict(t, pools_status, cfg) for t in turns],
         "unmatched_versions": [],
-        "settings": overview["settings"],
+        "settings": _settings_dict(cfg),
     }

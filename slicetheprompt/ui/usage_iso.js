@@ -7,8 +7,8 @@ import { STLLoader } from "/vendor/STLLoader.js";
  * damit auch Projekte mit vielen History-Versionen blitzschnell und GPU-schonend rendern.
  */
 
-const WIDTH = 960;
-const HEIGHT = 720;
+const WIDTH = 560;
+const HEIGHT = 420;
 const _cache = new Map();
 const _inFlight = new Map();
 let _loader = null;
@@ -50,7 +50,26 @@ function _fetchStlGeometry(stlUrl) {
   });
 }
 
-function _renderGeometryToDataUrl(geo, passed = true) {
+function _canvasToImageUrl(canvas) {
+  return new Promise((resolve) => {
+    if (typeof canvas.toBlob === "function") {
+      canvas.toBlob(
+        (blob) => {
+          if (blob) {
+            resolve(URL.createObjectURL(blob));
+          } else {
+            resolve(canvas.toDataURL("image/png"));
+          }
+        },
+        "image/png"
+      );
+      return;
+    }
+    resolve(canvas.toDataURL("image/png"));
+  });
+}
+
+async function _renderGeometryToDataUrl(geo, passed = true) {
   const renderer = _getRenderer();
   const scene = new THREE.Scene();
 
@@ -114,7 +133,7 @@ function _renderGeometryToDataUrl(geo, passed = true) {
   camera.updateMatrixWorld(true);
 
   renderer.render(scene, camera);
-  const dataUrl = renderer.domElement.toDataURL("image/png");
+  const imgUrl = await _canvasToImageUrl(renderer.domElement);
 
   // Aufräumen
   scene.remove(mesh, edges, grid);
@@ -126,11 +145,11 @@ function _renderGeometryToDataUrl(geo, passed = true) {
   else if (grid.material) grid.material.dispose();
   geo.dispose();
 
-  return dataUrl;
+  return imgUrl;
 }
 
 /**
- * Rendert ein STL als hochauflösendes PNG (Data-URL) in isometrischer Studio-Ansicht.
+ * Rendert ein STL als hochauflösendes PNG (Blob-/Data-URL) in isometrischer Studio-Ansicht.
  * @param {string} stlUrl
  * @param {boolean} passed
  * @returns {Promise<string>}
@@ -141,13 +160,16 @@ export function renderIsoStl(stlUrl, passed = true) {
   if (_cache.has(key)) return Promise.resolve(_cache.get(key));
   if (_inFlight.has(key)) return _inFlight.get(key);
 
+  const geoPromise = _fetchStlGeometry(stlUrl);
+
   const p = new Promise((resolve, reject) => {
     _queue = _queue
       .then(async () => {
         if (_cache.has(key)) return _cache.get(key);
-        const geo = await _fetchStlGeometry(stlUrl);
-        const url = _renderGeometryToDataUrl(geo, passed);
+        const geo = await geoPromise;
+        const url = await _renderGeometryToDataUrl(geo, passed);
         _cache.set(key, url);
+        await new Promise((r) => setTimeout(r, 0));
         return url;
       })
       .then(resolve, reject);
@@ -160,5 +182,10 @@ export function renderIsoStl(stlUrl, passed = true) {
 }
 
 export function clearIsoCache() {
+  for (const url of _cache.values()) {
+    if (typeof url === "string" && url.startsWith("blob:")) {
+      URL.revokeObjectURL(url);
+    }
+  }
   _cache.clear();
 }

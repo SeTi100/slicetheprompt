@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 from pathlib import Path
+import threading
 from typing import Any
 
 import yaml
@@ -17,12 +18,29 @@ PRINTER_YAML = CONFIG_DIR / "printer.yaml"
 CALIBRATION_YAML = CONFIG_DIR / "calibration.yaml"
 SLICER_YAML = CONFIG_DIR / "slicer.yaml"
 
+_YAML_CACHE_LOCK = threading.Lock()
+_YAML_CACHE: dict[str, tuple[int, int, dict]] = {}
+
 
 def _read_yaml(path: Path) -> dict:
     if not path.exists():
         return {}
-    with open(path, encoding="utf-8") as f:
-        return yaml.safe_load(f) or {}
+    try:
+        st = path.stat()
+        key = str(path.resolve())
+        with _YAML_CACHE_LOCK:
+            hit = _YAML_CACHE.get(key)
+            if hit is not None and hit[0] == st.st_mtime_ns and hit[1] == st.st_size:
+                return copy.deepcopy(hit[2])
+        with open(path, encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+        with _YAML_CACHE_LOCK:
+            if len(_YAML_CACHE) > 128:
+                _YAML_CACHE.clear()
+            _YAML_CACHE[key] = (st.st_mtime_ns, st.st_size, copy.deepcopy(data))
+        return data
+    except OSError:
+        return {}
 
 
 def _deep_merge(base: dict, over: dict) -> dict:
@@ -60,6 +78,8 @@ def write_yaml(path: Path, data: dict, header: str = "") -> None:
             for line in header.strip().splitlines():
                 f.write(f"# {line}\n")
         yaml.safe_dump(data, f, allow_unicode=True, sort_keys=False)
+    with _YAML_CACHE_LOCK:
+        _YAML_CACHE.pop(str(path.resolve()), None)
 
 
 def project_dir(name_or_path: str) -> Path:

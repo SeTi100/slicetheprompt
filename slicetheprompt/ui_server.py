@@ -866,7 +866,8 @@ class StudioHandler(BaseHTTPRequestHandler):
 
         ext = target.suffix.lower()
         ctype = MIME_OVERRIDES.get(ext) or mimetypes.guess_type(str(target))[0] or "application/octet-stream"
-        self._send_bytes(target.read_bytes(), ctype, status=200, cache="no-store")
+        cache = "public, max-age=3600" if parts[0] == "history" else "no-store"
+        self._send_bytes(target.read_bytes(), ctype, status=200, cache=cache)
 
     def _handle_sse(self) -> None:
         self.send_response(200)
