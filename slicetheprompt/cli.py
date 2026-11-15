@@ -288,6 +288,8 @@ def main(argv=None) -> int:
     s.add_argument("--status", action="store_true", help="rclone- und Remote-Status prüfen")
     s.add_argument("--bisync", action="store_true", help="2-Wege-Sync (rclone bisync) statt 1-Wege-copy")
     s.add_argument("--resync", action="store_true", help="Erstlauf-Abgleich für --bisync erzwingen")
+    s.add_argument("--watch", action="store_true", help="Laufender 2-Wege-Sync alle N Sekunden (inkl. Erstlauf-Resync)")
+    s.add_argument("--interval", type=int, default=120, help="Intervall in Sekunden für --watch (Standard: 120)")
     s.add_argument("--dry-run", action="store_true", help="Nur simulieren, nichts übertragen")
 
     a = ap.parse_args(argv)
@@ -436,6 +438,8 @@ def main(argv=None) -> int:
             from . import sync as sync_mod
             if a.status:
                 _out(sync_mod.sync_status())
+            elif a.watch:
+                sync_mod.watch_bisync(a.project, interval_s=a.interval)
             elif a.bisync:
                 res = sync_mod.bisync(a.project, resync=a.resync, dry_run=a.dry_run)
                 _out(res)

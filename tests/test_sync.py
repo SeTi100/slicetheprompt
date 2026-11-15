@@ -106,10 +106,29 @@ class SyncTests(unittest.TestCase):
                     str(projects_dir),
                     "gdrive:SliceThePrompt/projects",
                     "--create-empty-src-dirs",
+                    "--conflict-resolve",
+                    "newer",
                     "--resync",
                     "--dry-run",
                 ],
             )
+
+    def test_watch_bisync_auto_resyncs_on_missing_prior(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir = Path(tmp) / ".slicetheprompt"
+            calls = [
+                {"ok": False, "returncode": 1, "target": "gdrive:SliceThePrompt/projects",
+                 "stderr": "ERROR : cannot find prior Path1 or Path2 listings"},
+                {"ok": True, "returncode": 0, "target": "gdrive:SliceThePrompt/projects", "stderr": ""},
+            ]
+            with patch.object(sync_mod, "STATE_DIR", state_dir), \
+                 patch.object(sync_mod, "SYNC_LOG", state_dir / "sync.log"), \
+                 patch.object(sync_mod, "bisync", side_effect=calls) as bisync_mock:
+                sync_mod.watch_bisync(interval_s=60, auto_resync=True, max_runs=1)
+            self.assertEqual(bisync_mock.call_count, 2)
+            self.assertEqual(bisync_mock.call_args_list[0].kwargs, {"resync": False})
+            self.assertEqual(bisync_mock.call_args_list[1].kwargs, {"resync": True})
+            self.assertIn("bisync OK", (state_dir / "sync.log").read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

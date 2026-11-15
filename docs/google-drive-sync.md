@@ -163,20 +163,20 @@ uv run slicetheprompt sync --bisync --resync
 
 ### Laufender 2-Wege-Sync (z. B. in `start_all.sh` oder per Cron)
 
-Danach reicht jeweils ohne `--resync`:
+Danach reicht jeweils ohne `--resync` (bei gleichzeitigen Änderungen auf Handy & PC gewinnt standardmässig die neuere Datei via `--conflict-resolve newer`, die ältere bleibt als `.conflict` erhalten):
 
 ```bash
 uv run slicetheprompt sync --bisync
 ```
 
-Beispiel für `start_all.sh` (beim Start von PRoot/Studio einmal abgleichen):
+Oder als Dauerläufer im Hintergrund (synchronisiert alle 120 s und führt beim allerersten Start automatisch `--resync` aus):
 
 ```bash
-# Optionaler 2-Wege-Sync beim Start (im Hintergrund)
-uv run slicetheprompt sync --bisync >> .slicetheprompt/sync.log 2>&1 &
+# In start_all.sh (beim Start im Hintergrund):
+uv run slicetheprompt sync --watch --interval 120 >> .slicetheprompt/sync.log 2>&1 &
 ```
 
-Oder alle 5 Minuten per Cron im Debian-PRoot (`crontab -e`):
+Alternativ alle 5 Minuten per Cron im Debian-PRoot (`crontab -e`):
 
 ```cron
 */5 * * * * cd ~/Coding_Projects/slicetheprompt && uv run slicetheprompt sync --bisync >> .slicetheprompt/sync.log 2>&1

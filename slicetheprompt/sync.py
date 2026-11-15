@@ -19,6 +19,7 @@ DEFAULT_SYNC_CFG: dict[str, Any] = {
     "remote": "gdrive",      # rclone-Remote-Name (ohne Doppelpunkt)
     "remote_path": "SliceThePrompt/projects",
     "exclude": [],           # z. B. ["*.gcode", "history/**"]
+    "conflict_resolve": "newer",  # bei bisync: neuere Datei gewinnt (Verlierer als .conflict)
 }
 
 _REMOTE_CACHE: dict[tuple[str, str], bool] = {}
@@ -195,6 +196,8 @@ def bisync(project: str | None = None, resync: bool = False, dry_run: bool = Fal
     else:
         src, target = PROJECTS_DIR, _target_for(cfg)
     cmd = [rclone_bin, "bisync", str(src), target, "--create-empty-src-dirs"]
+    if cfg.get("conflict_resolve"):
+        cmd += ["--conflict-resolve", str(cfg["conflict_resolve"])]
     for pat in cfg.get("exclude") or []:
         cmd += ["--exclude", str(pat)]
     if resync:
@@ -213,3 +216,24 @@ def bisync(project: str | None = None, resync: bool = False, dry_run: bool = Fal
         "stdout": proc.stdout[-2000:] if proc.stdout else "",
         "stderr": proc.stderr[-2000:] if proc.stderr else "",
     }
+
+
+def watch_bisync(project: str | None = None, interval_s: int = 120,
+                 auto_resync: bool = True, max_runs: int | None = None) -> None:
+    """Führt periodisch einen 2-Wege-Sync (`rclone bisync`) aus (z. B. aus start_all.sh)."""
+    interval_s = max(15, int(interval_s))
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    runs = 0
+    while max_runs is None or runs < max_runs:
+        runs += 1
+        res = bisync(project, resync=False)
+        if not res["ok"] and auto_resync and "prior" in (res.get("stderr") or "").lower():
+            res = bisync(project, resync=True)
+        with open(SYNC_LOG, "a", encoding="utf-8") as fh:
+            status = "OK" if res["ok"] else f"ERR({res['returncode']})"
+            fh.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] bisync {status} -> {res['target']}\n")
+            if not res["ok"] and res.get("stderr"):
+                fh.write(res["stderr"].rstrip() + "\n")
+        if max_runs is not None and runs >= max_runs:
+            break
+        time.sleep(interval_s)
