@@ -283,6 +283,13 @@ def main(argv=None) -> int:
     s.add_argument("--offset", nargs=3, type=lambda v: float(v.replace(",", ".")), default=None)
     s.add_argument("--overlap", type=lambda v: float(v.replace(",", ".")), default=2.0)
 
+    s = sub.add_parser("sync", help="Projekte per rclone mit Google Drive synchronisieren")
+    s.add_argument("project", nargs="?", default=None, help="Einzelnes Projekt (leer = alle unter projects/)")
+    s.add_argument("--status", action="store_true", help="rclone- und Remote-Status prüfen")
+    s.add_argument("--bisync", action="store_true", help="2-Wege-Sync (rclone bisync) statt 1-Wege-copy")
+    s.add_argument("--resync", action="store_true", help="Erstlauf-Abgleich für --bisync erzwingen")
+    s.add_argument("--dry-run", action="store_true", help="Nur simulieren, nichts übertragen")
+
     a = ap.parse_args(argv)
     try:
         if a.cmd == "setup":
@@ -425,6 +432,18 @@ def main(argv=None) -> int:
                 offset_xyz=a.offset,
                 overlap_mm=a.overlap,
             ))
+        elif a.cmd == "sync":
+            from . import sync as sync_mod
+            if a.status:
+                _out(sync_mod.sync_status())
+            elif a.bisync:
+                res = sync_mod.bisync(a.project, resync=a.resync, dry_run=a.dry_run)
+                _out(res)
+                return 0 if res["ok"] else 1
+            else:
+                res = sync_mod.sync_project(a.project, dry_run=a.dry_run)
+                _out(res)
+                return 0 if res["ok"] else 1
     except Exception as exc:
         print(f"FEHLER: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1

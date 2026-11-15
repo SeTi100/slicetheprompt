@@ -110,6 +110,11 @@ def new_project(name: str, material: str = "pla", beschreibung: str = "", code: 
     if build:
         b_res = run_all(d.name, orientation=orientation)
         res.update(b_res)
+    else:
+        from .sync import sync_project_async
+        s_res = sync_project_async(d)
+        if s_res.get("triggered"):
+            res["sync"] = s_res
     return res
 
 
@@ -529,6 +534,10 @@ def run_all(project: str, orientation: str | None = None, reason: str = "build_a
             for a_name in asms:
                 cleared.append(clear_project_feedback(project_dir(a_name)))
             out["feedback_cleared"] = cleared
+    from .sync import sync_project_async
+    s_res = sync_project_async(d)
+    if s_res.get("triggered"):
+        out["sync"] = s_res
     return out
 
 

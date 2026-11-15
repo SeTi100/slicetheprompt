@@ -611,7 +611,12 @@ def build_assembly(project: str) -> dict:
         png = render_assembly(d, res, 0)
     except Exception as exc:  # noqa: BLE001 – Bild ist Beigabe, Prüfung bleibt gültig
         png, res["hinweise"] = None, hinweise + [f"render.png fehlgeschlagen: {exc}"]
-    return summary(res, png)
+    from .sync import sync_project_async
+    s_res = sync_project_async(d)
+    out_sum = summary(res, png)
+    if s_res.get("triggered"):
+        out_sum["sync"] = s_res
+    return out_sum
 
 
 def _load_parts(asm: dict, d: Path, sub: Path | None) -> tuple[list, dict, list]:

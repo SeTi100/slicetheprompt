@@ -58,4 +58,11 @@ def run_doctor(fix: bool = True) -> dict:
     except Exception as exc:
         out["ok"] = False
         out["cad"] = {"ok": False, "error": str(exc), "hint": "uv sync ausführen"}
+
+    # Google Drive Sync (optional)
+    try:
+        from .sync import sync_status
+        out["sync"] = sync_status()
+    except Exception as exc:
+        out["sync"] = {"active": False, "error": str(exc)}
     return out
